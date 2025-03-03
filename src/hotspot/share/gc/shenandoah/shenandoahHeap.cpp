@@ -421,6 +421,7 @@ jint ShenandoahHeap::initialize() {
     // We are initializing free set.  We ignore cset region tallies.
     size_t first_old, last_old, num_old;
     _free_set->prepare_to_rebuild(young_cset_regions, old_cset_regions, first_old, last_old, num_old);
+    log_info(gc)("heap initialize: young cset %lu, old cset %lu, num old %lu", young_cset_regions, old_cset_regions, num_old);
     _free_set->rebuild(young_cset_regions, old_cset_regions);
   }
 
@@ -3070,6 +3071,7 @@ void ShenandoahHeap::rebuild_free_set(bool concurrent) {
   size_t young_cset_regions, old_cset_regions;
   size_t first_old_region, last_old_region, old_region_count;
   _free_set->prepare_to_rebuild(young_cset_regions, old_cset_regions, first_old_region, last_old_region, old_region_count);
+  log_info(gc)("new young trash: %lu, new old trash: %lu", young_cset_regions, old_cset_regions);
   // If there are no old regions, first_old_region will be greater than last_old_region
   assert((first_old_region > last_old_region) ||
          ((last_old_region + 1 - first_old_region >= old_region_count) &&

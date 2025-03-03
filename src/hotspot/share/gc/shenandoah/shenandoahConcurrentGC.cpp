@@ -287,6 +287,10 @@ bool ShenandoahConcurrentGC::collect(GCCause::Cause cause) {
                        success? "successfully transferred": "failed to transfer", region_xfer, region_destination,
                        byte_size_in_proper_unit(old_available), proper_unit_for_byte_size(old_available),
                        byte_size_in_proper_unit(young_available), proper_unit_for_byte_size(young_available));
+    
+    stringStream stream;
+    heap->free_set()->print_on(&stream);
+    log_info(gc)("%s", stream.freeze());
   }
   return true;
 }
