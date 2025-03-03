@@ -213,6 +213,7 @@ ShenandoahGenerationSizer::ShenandoahGenerationSizer()
     if (FLAG_IS_CMDLINE(MaxNewSize)) {
       _max_desired_young_regions = MAX2(uint(MaxNewSize / ShenandoahHeapRegion::region_size_bytes()), 1U);
       _sizer_kind = SizerMaxAndNewSize;
+      log_info(gc)("SizerMaxAndNewSize, min_new %u, max_new %u", _min_desired_young_regions, _max_desired_young_regions);
     } else {
       _sizer_kind = SizerNewSizeOnly;
     }
