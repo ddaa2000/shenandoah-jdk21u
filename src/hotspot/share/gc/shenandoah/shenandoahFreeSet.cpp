@@ -1599,8 +1599,11 @@ void ShenandoahFreeSet::print_on(outputStream* out) const {
       }
     }
   }
+  ShenandoahGeneration* young = _heap->young_generation(), *old = _heap->old_generation();
   out->print_cr("free_mutator %u, free_collector %u, free_old_collector %u", free_mutator, free_collector, free_old_collector);
-  out->print_cr("young_unaffiliated %lu, old_unaffiliated %lu", _heap->young_generation()->free_unaffiliated_regions(), _heap->old_generation()->free_unaffiliated_regions());
+  out->print_cr("young_unaffiliated %lu, old_unaffiliated %lu", young->free_unaffiliated_regions(), old->free_unaffiliated_regions());
+  out->print_cr("young_used_regions %lu, young_max %lu, young_soft_max %lu", young->used_regions(), young->max_capacity(), young->soft_max_capacity());
+  out->print_cr("old_used_regions %lu, old_max %lu, old_soft_max %lu", old->used_regions(), old->max_capacity(), old->soft_max_capacity());
 }
 
 /*
