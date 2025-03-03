@@ -572,6 +572,10 @@ void ShenandoahHeap::initialize_heuristics_generations() {
     _old_generation->initialize_heuristics(_gc_mode);
   }
   _evac_tracker = new ShenandoahEvacuationTracker(mode()->is_generational());
+
+  ShenandoahGeneration *young = _young_generation, *old = _old_generation;
+  log_info(gc)("young_used_regions %lu, young_max %lu, young_soft_max %lu", young->used_regions(), young->max_capacity(), young->soft_max_capacity());
+  log_info(gc)("old_used_regions %lu, old_max %lu, old_soft_max %lu", old->used_regions(), old->max_capacity(), old->soft_max_capacity());
 }
 
 #ifdef _MSC_VER
