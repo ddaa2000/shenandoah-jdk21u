@@ -30,6 +30,7 @@
 #include "gc/shenandoah/shenandoahGeneration.hpp"
 #include "gc/shenandoah/shenandoahHeap.inline.hpp"
 #include "gc/shenandoah/shenandoahHeapRegion.inline.hpp"
+#include "gc/shenandoah/shenandoahFreeSet.hpp"
 
 #include "logging/log.hpp"
 
@@ -263,6 +264,6 @@ void ShenandoahGenerationalHeuristics::log_cset_composition(ShenandoahCollection
           byte_size_in_proper_unit(collected_old), proper_unit_for_byte_size(collected_old));
   
   stringStream ss;
-  heap->free_set()->print_on_summary(&ss);
-  log_info(gc)("%s", ss);
+  ShenandoahHeap::heap()->free_set()->print_on_summary(&ss);
+  log_info(gc)("%s", ss.freeze());
 }

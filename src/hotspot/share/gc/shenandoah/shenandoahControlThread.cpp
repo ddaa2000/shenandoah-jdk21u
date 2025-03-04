@@ -709,7 +709,7 @@ void ShenandoahControlThread::service_concurrent_cycle(ShenandoahHeap* heap,
       if (heap->cancelled_gc()) {
         stringStream ss;
         heap->free_set()->print_on_summary(&ss);
-        log_info(gc)("%s", ss);
+        log_info(gc)("%s", ss.freeze());
         msg = (do_old_gc_bootstrap) ? "At end of Interrupted Concurrent Bootstrap GC":
                                       "At end of Interrupted Concurrent Young GC";
       } else {

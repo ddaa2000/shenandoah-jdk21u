@@ -1357,7 +1357,7 @@ void ShenandoahFreeSet::rebuild_simple(size_t young_cset_regions, size_t old_cse
   // }
 
   young_reserve = (_heap->max_capacity() / 100) * ShenandoahEvacReserve;
-  old_reserve = old_unaffiliated_regions * region_size_bytes
+  old_reserve = old_unaffiliated_regions * region_size_bytes;
 
 
   // Old available regions that have less than PLAB::min_size() of available memory are not placed into the OldCollector
@@ -1517,18 +1517,18 @@ void ShenandoahFreeSet::reserve_regions_simple(size_t to_reserve, size_t young_u
     }
   }
 
-  if (LogTarget(Info, gc, free)::is_enabled()) {
-    size_t old_reserve = _free_sets.capacity_of(OldCollector);
-    if (old_reserve < to_reserve_old) {
-      log_info(gc, free)("Wanted " PROPERFMT " for old reserve, but only reserved: " PROPERFMT,
-                         PROPERFMTARGS(to_reserve_old), PROPERFMTARGS(old_reserve));
-    }
-    size_t young_reserve = _free_sets.capacity_of(Collector);
-    if (young_reserve < to_reserve) {
-      log_info(gc, free)("Wanted " PROPERFMT " for young reserve, but only reserved: " PROPERFMT,
-                         PROPERFMTARGS(to_reserve), PROPERFMTARGS(young_reserve));
-    }
-  }
+  // if (LogTarget(Info, gc, free)::is_enabled()) {
+  //   size_t old_reserve = _free_sets.capacity_of(OldCollector);
+  //   if (old_reserve < to_reserve_old) {
+  //     log_info(gc, free)("Wanted " PROPERFMT " for old reserve, but only reserved: " PROPERFMT,
+  //                        PROPERFMTARGS(to_reserve_old), PROPERFMTARGS(old_reserve));
+  //   }
+  //   size_t young_reserve = _free_sets.capacity_of(Collector);
+  //   if (young_reserve < to_reserve) {
+  //     log_info(gc, free)("Wanted " PROPERFMT " for young reserve, but only reserved: " PROPERFMT,
+  //                        PROPERFMTARGS(to_reserve), PROPERFMTARGS(young_reserve));
+  //   }
+  // }
 }
 
 void ShenandoahFreeSet::log_status() {
