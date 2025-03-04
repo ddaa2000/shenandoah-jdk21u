@@ -193,6 +193,8 @@ public:
   void prepare_to_rebuild(size_t &young_cset_regions, size_t &old_cset_regions,
                           size_t &first_old_region, size_t &last_old_region, size_t &old_region_count);
   void rebuild(size_t young_cset_regions, size_t old_cset_regions);
+  void rebuild_simple(size_t young_cset_regions, size_t old_cset_regions);
+
   void move_collector_sets_to_mutator(size_t cset_regions);
 
   void add_old_collector_free_region(ShenandoahHeapRegion* region);
@@ -221,6 +223,8 @@ public:
   void find_regions_with_alloc_capacity(size_t &young_cset_regions, size_t &old_cset_regions,
                                         size_t &first_old_region, size_t &last_old_region, size_t &old_region_count);
   void reserve_regions(size_t young_reserve, size_t old_reserve);
+  void reserve_regions_simple(size_t young_reserve, size_t old_reserve);
+
 };
 
 #endif // SHARE_GC_SHENANDOAH_SHENANDOAHFREESET_HPP
