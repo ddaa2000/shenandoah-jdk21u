@@ -1606,6 +1606,47 @@ void ShenandoahFreeSet::print_on(outputStream* out) const {
   out->print_cr("old_used_regions %lu, old_max %lu, old_soft_max %lu", old->used_regions(), old->max_capacity(), old->soft_max_capacity());
 }
 
+void ShenandoahFreeSet::print_on_summary(outputStream* out) const {
+  uint free_mutator = 0, free_collector = 0, free_old_collector = 0;
+  out->print_cr("Mutator Free Set: " SIZE_FORMAT "", _free_sets.count(Mutator));
+  for (size_t index = _free_sets.leftmost(Mutator); index <= _free_sets.rightmost(Mutator); index++) {
+    if (_free_sets.in_free_set(index, Mutator)) {
+      // _heap->get_region(index)->print_on(out);
+      ShenandoahAffiliation affilation = _heap->get_region(index)->affiliation();
+      if(affilation == ShenandoahAffiliation::FREE){
+        free_mutator += 1;
+      }
+    }
+  }
+  out->print_cr("Collector Free Set: " SIZE_FORMAT "", _free_sets.count(Collector));
+  for (size_t index = _free_sets.leftmost(Collector); index <= _free_sets.rightmost(Collector); index++) {
+    if (_free_sets.in_free_set(index, Collector)) {
+      // _heap->get_region(index)->print_on(out);
+      ShenandoahAffiliation affilation = _heap->get_region(index)->affiliation();
+      if(affilation == ShenandoahAffiliation::FREE){
+        free_collector += 1;
+      }
+    }
+  }
+  if (_heap->mode()->is_generational()) {
+    out->print_cr("Old Collector Free Set: " SIZE_FORMAT "", _free_sets.count(OldCollector));
+    for (size_t index = _free_sets.leftmost(OldCollector); index <= _free_sets.rightmost(OldCollector); index++) {
+      if (_free_sets.in_free_set(index, OldCollector)) {
+        // _heap->get_region(index)->print_on(out);
+        ShenandoahAffiliation affilation = _heap->get_region(index)->affiliation();
+        if(affilation == ShenandoahAffiliation::FREE){
+          free_old_collector += 1;
+        }
+      }
+    }
+  }
+  ShenandoahGeneration* young = _heap->young_generation(), *old = _heap->old_generation();
+  out->print_cr("free_mutator %u, free_collector %u, free_old_collector %u", free_mutator, free_collector, free_old_collector);
+  out->print_cr("young_unaffiliated %lu, old_unaffiliated %lu", young->free_unaffiliated_regions(), old->free_unaffiliated_regions());
+  out->print_cr("young_used_regions %lu, young_max %lu, young_soft_max %lu", young->used_regions(), young->max_capacity(), young->soft_max_capacity());
+  out->print_cr("old_used_regions %lu, old_max %lu, old_soft_max %lu", old->used_regions(), old->max_capacity(), old->soft_max_capacity());
+}
+
 /*
  * Internal fragmentation metric: describes how fragmented the heap regions are.
  *

@@ -215,6 +215,8 @@ public:
   double external_fragmentation();
 
   void print_on(outputStream* out) const;
+  void print_on_summary(outputStream* out) const;
+
 
   void find_regions_with_alloc_capacity(size_t &young_cset_regions, size_t &old_cset_regions,
                                         size_t &first_old_region, size_t &last_old_region, size_t &old_region_count);

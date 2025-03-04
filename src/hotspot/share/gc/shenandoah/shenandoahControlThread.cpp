@@ -707,6 +707,9 @@ void ShenandoahControlThread::service_concurrent_cycle(ShenandoahHeap* heap,
     ShenandoahMmuTracker* mmu_tracker = heap->mmu_tracker();
     if (generation->is_young()) {
       if (heap->cancelled_gc()) {
+        stringStream ss;
+        heap->free_set()->print_on_summary(&ss);
+        log_info(gc)("%s", ss);
         msg = (do_old_gc_bootstrap) ? "At end of Interrupted Concurrent Bootstrap GC":
                                       "At end of Interrupted Concurrent Young GC";
       } else {
