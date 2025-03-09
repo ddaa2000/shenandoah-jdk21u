@@ -1271,6 +1271,7 @@ void ShenandoahFreeSet::rebuild_simple(size_t young_cset_regions, size_t old_cse
   size_t young_capacity = _heap->young_generation()->max_capacity();
   size_t young_available = _heap->young_generation()->available();
   size_t young_unaffiliated_regions = _heap->young_generation()->free_unaffiliated_regions();
+  size_t young_unaffiliated_regions_orig = young_unaffiliated_regions;
 
   old_unaffiliated_regions += old_cset_regions;
   old_available += old_cset_regions * region_size_bytes;
@@ -1286,11 +1287,14 @@ void ShenandoahFreeSet::rebuild_simple(size_t young_cset_regions, size_t old_cse
   size_t old_region_surplus = 0;
   size_t old_region_deficit = 0;
 
+  log_info(gc)("young_soft_max %lu, young_used %lu, young_unaffiliated_orig %lu", young_soft_max_capacity_regions,
+    young_used_regions, young_unaffiliated_regions_orig);
 
-  if ( young_soft_max_capacity_regions > young_used_regions + young_unaffiliated_regions ) {
-    old_region_deficit = young_soft_max_capacity_regions - young_used_regions - young_unaffiliated_regions;
+
+  if ( young_soft_max_capacity_regions > young_used_regions + young_unaffiliated_regions_orig ) {
+    old_region_surplus = young_soft_max_capacity_regions - young_used_regions - young_unaffiliated_regions_orig;
   } else {
-    old_region_surplus = young_used_regions + young_unaffiliated_regions - young_soft_max_capacity_regions;
+    old_region_deficit = young_used_regions + young_unaffiliated_regions_orig - young_soft_max_capacity_regions;
   }
 
   if (old_region_surplus > 0){
@@ -1382,7 +1386,7 @@ void ShenandoahFreeSet::rebuild_simple(size_t young_cset_regions, size_t old_cse
     young_reserve = young_unaffiliated_regions * region_size_bytes;
   }
 
-  log_info("young reserve %lu young_unaffiliated_regions %lu", young_reserve / region_size_bytes, young_unaffiliated_regions);
+  log_info(gc)("young reserve %lu young_unaffiliated_regions %lu", young_reserve / region_size_bytes, young_unaffiliated_regions);
 
   reserve_regions_simple(young_reserve, young_unaffiliated_regions);
   _free_sets.establish_alloc_bias(OldCollector);
@@ -1461,7 +1465,7 @@ void ShenandoahFreeSet::reserve_regions_simple(size_t to_reserve, size_t young_u
     if (_free_sets.in_free_set(index, Mutator)) {
       // _heap->get_region(index)->print_on(out);
       ShenandoahAffiliation affilation = _heap->get_region(index)->affiliation();
-      if(affilation == ShenandoahAffiliation::FREE){
+      if(affilation == ShenandoahAffiliation::FREE || _heap->get_region(index)->is_trash()){
         free_mutator += 1;
       }
     }
@@ -1471,7 +1475,7 @@ void ShenandoahFreeSet::reserve_regions_simple(size_t to_reserve, size_t young_u
     if (_free_sets.in_free_set(index, Collector)) {
       // _heap->get_region(index)->print_on(out);
       ShenandoahAffiliation affilation = _heap->get_region(index)->affiliation();
-      if(affilation == ShenandoahAffiliation::FREE){
+      if(affilation == ShenandoahAffiliation::FREE || _heap->get_region(index)->is_trash()){
         free_collector += 1;
       }
     }
@@ -1482,7 +1486,7 @@ void ShenandoahFreeSet::reserve_regions_simple(size_t to_reserve, size_t young_u
       if (_free_sets.in_free_set(index, OldCollector)) {
         // _heap->get_region(index)->print_on(out);
         ShenandoahAffiliation affilation = _heap->get_region(index)->affiliation();
-        if(affilation == ShenandoahAffiliation::FREE){
+        if(affilation == ShenandoahAffiliation::FREE || _heap->get_region(index)->is_trash()){
           free_old_collector += 1;
         }
       }
@@ -1495,11 +1499,19 @@ void ShenandoahFreeSet::reserve_regions_simple(size_t to_reserve, size_t young_u
     ShouldNotReachHere();
   }
 
+  log_info(gc)("free young %lu, young_unaffiliated %lu", free_young, young_unaffiliated_target);
+
+  size_t free_mutator_met = 0;
+
   for (size_t i = _heap->num_regions(); i > 0; i--) {
     size_t idx = i - 1;
     ShenandoahHeapRegion* r = _heap->get_region(idx);
     if (!_free_sets.in_free_set(idx, Mutator)) {
       continue;
+    }
+
+    if (r->is_trash() || !r->is_affiliated()) {
+      free_mutator_met += 1;
     }
 
     size_t ac = alloc_capacity(r);
@@ -1512,6 +1524,7 @@ void ShenandoahFreeSet::reserve_regions_simple(size_t to_reserve, size_t young_u
 
     if (!move_to_old && !move_to_young) {
       // We've satisfied both to_reserve and to_reserved_old
+      log_info(gc)("break");
       break;
     }
 
@@ -1534,6 +1547,8 @@ void ShenandoahFreeSet::reserve_regions_simple(size_t to_reserve, size_t young_u
       log_debug(gc)("  Shifting region " SIZE_FORMAT " from mutator_free to collector_free", idx);
     }
   }
+
+  log_info(gc)("free mutator met %lu", free_mutator_met);
 
   // if (LogTarget(Info, gc, free)::is_enabled()) {
   //   size_t old_reserve = _free_sets.capacity_of(OldCollector);
@@ -1803,7 +1818,7 @@ void ShenandoahFreeSet::print_on(outputStream* out) const {
     if (_free_sets.in_free_set(index, Mutator)) {
       _heap->get_region(index)->print_on(out);
       ShenandoahAffiliation affilation = _heap->get_region(index)->affiliation();
-      if(affilation == ShenandoahAffiliation::FREE){
+      if(affilation == ShenandoahAffiliation::FREE || _heap->get_region(index)->is_trash()){
         free_mutator += 1;
       }
     }
@@ -1813,7 +1828,7 @@ void ShenandoahFreeSet::print_on(outputStream* out) const {
     if (_free_sets.in_free_set(index, Collector)) {
       _heap->get_region(index)->print_on(out);
       ShenandoahAffiliation affilation = _heap->get_region(index)->affiliation();
-      if(affilation == ShenandoahAffiliation::FREE){
+      if(affilation == ShenandoahAffiliation::FREE || _heap->get_region(index)->is_trash()){
         free_collector += 1;
       }
     }
@@ -1824,7 +1839,7 @@ void ShenandoahFreeSet::print_on(outputStream* out) const {
       if (_free_sets.in_free_set(index, OldCollector)) {
         _heap->get_region(index)->print_on(out);
         ShenandoahAffiliation affilation = _heap->get_region(index)->affiliation();
-        if(affilation == ShenandoahAffiliation::FREE){
+        if(affilation == ShenandoahAffiliation::FREE || _heap->get_region(index)->is_trash()){
           free_old_collector += 1;
         }
       }
@@ -1844,7 +1859,7 @@ void ShenandoahFreeSet::print_on_summary(outputStream* out) const {
     if (_free_sets.in_free_set(index, Mutator)) {
       // _heap->get_region(index)->print_on(out);
       ShenandoahAffiliation affilation = _heap->get_region(index)->affiliation();
-      if(affilation == ShenandoahAffiliation::FREE){
+      if(affilation == ShenandoahAffiliation::FREE  || _heap->get_region(index)->is_trash()){
         free_mutator += 1;
       }
     }
@@ -1854,7 +1869,7 @@ void ShenandoahFreeSet::print_on_summary(outputStream* out) const {
     if (_free_sets.in_free_set(index, Collector)) {
       // _heap->get_region(index)->print_on(out);
       ShenandoahAffiliation affilation = _heap->get_region(index)->affiliation();
-      if(affilation == ShenandoahAffiliation::FREE){
+      if(affilation == ShenandoahAffiliation::FREE  || _heap->get_region(index)->is_trash()){
         free_collector += 1;
       }
     }
@@ -1865,7 +1880,7 @@ void ShenandoahFreeSet::print_on_summary(outputStream* out) const {
       if (_free_sets.in_free_set(index, OldCollector)) {
         // _heap->get_region(index)->print_on(out);
         ShenandoahAffiliation affilation = _heap->get_region(index)->affiliation();
-        if(affilation == ShenandoahAffiliation::FREE){
+        if(affilation == ShenandoahAffiliation::FREE || _heap->get_region(index)->is_trash()){
           free_old_collector += 1;
         }
       }

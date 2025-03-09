@@ -289,7 +289,8 @@ bool ShenandoahConcurrentGC::collect(GCCause::Cause cause) {
                        byte_size_in_proper_unit(young_available), proper_unit_for_byte_size(young_available));
     
     stringStream stream;
-    heap->free_set()->print_on(&stream);
+    log_info(gc)("end of concurrent gc");
+    heap->free_set()->print_on_summary(&stream);
     log_info(gc)("%s", stream.freeze());
   }
   return true;
