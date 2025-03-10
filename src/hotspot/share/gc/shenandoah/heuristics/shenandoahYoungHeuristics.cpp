@@ -89,8 +89,14 @@ void ShenandoahYoungHeuristics::choose_young_collection_set(ShenandoahCollection
   // If this is mixed evacuation, the old-gen candidate regions have already been added.
   size_t max_cset = (size_t) (heap->get_young_evac_reserve() / ShenandoahEvacWaste);
   size_t cur_cset = 0;
-  size_t free_target = (capacity * ShenandoahMinFreeThreshold) / 100 + max_cset;
+  size_t free_target = (capacity * ShenandoahYoungMinFreeThreshold) / 100 + max_cset;
   size_t min_garbage = (free_target > actual_free) ? (free_target - actual_free) : 0;
+
+  log_info(gc)("Choose young collection set, max_cset " SIZE_FORMAT "%s, free_target " SIZE_FORMAT 
+    "%s, min_garbage" SIZE_FORMAT "%s", 
+    byte_size_in_proper_unit(max_cset), proper_unit_for_byte_size(max_cset),
+    byte_size_in_proper_unit(free_target), proper_unit_for_byte_size(free_target),
+    byte_size_in_proper_unit(min_garbage), proper_unit_for_byte_size(min_garbage));
 
 
   log_info(gc, ergo)(
@@ -98,6 +104,7 @@ void ShenandoahYoungHeuristics::choose_young_collection_set(ShenandoahCollection
           byte_size_in_proper_unit(max_cset), proper_unit_for_byte_size(max_cset),
           byte_size_in_proper_unit(actual_free), proper_unit_for_byte_size(actual_free));
 
+  size_t chosen_cset_regions = 0;
   for (size_t idx = 0; idx < size; idx++) {
     ShenandoahHeapRegion* r = data[idx]._region;
     if (cset->is_preselected(r->index())) {
@@ -113,12 +120,19 @@ void ShenandoahYoungHeuristics::choose_young_collection_set(ShenandoahCollection
         cur_cset = new_cset;
         cur_young_garbage = new_garbage;
         cset->add_region(r);
+        chosen_cset_regions += 1;
+      } else if (new_cset > max_cset){
+        log_info(gc)("to space exhausted");
       }
     }
     // Note that we do not add aged regions if they were not pre-selected.  The reason they were not preselected
     // is because there is not sufficient room in old-gen to hold their to-be-promoted live objects or because
     // they are to be promoted in place.
   }
+  log_info(gc)("Chosen garbage " SIZE_FORMAT "%s, chosen_cset_regions %lu",
+    byte_size_in_proper_unit(cur_young_garbage), proper_unit_for_byte_size(cur_young_garbage),
+    chosen_cset_regions
+  );
 }
 
 

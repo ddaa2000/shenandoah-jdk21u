@@ -210,6 +210,12 @@ public:
     return capacity() - used();
   }
 
+  inline size_t capacity_all()  const { return _free_sets.capacity_of(Mutator) + _free_sets.capacity_of(Collector) + _free_sets.capacity_of(OldCollector); }
+  inline size_t used_all()      const { return _free_sets.used_by(Mutator) + _free_sets.used_by(Collector) + _free_sets.used_by(OldCollector);     }
+  inline size_t available_all() const {
+    return capacity_all() - used_all();
+  }
+
   HeapWord* allocate(ShenandoahAllocRequest& req, bool& in_new_region);
   size_t unsafe_peek_free() const;
 
