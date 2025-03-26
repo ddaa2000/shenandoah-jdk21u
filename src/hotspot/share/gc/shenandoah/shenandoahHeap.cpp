@@ -197,6 +197,10 @@ jint ShenandoahHeap::initialize() {
   _committed = _initial_size;
 
   _copy_bytes_during_gc = 0;
+  _scanned_objs_during_gc = 0;
+  _copy_user_time = 0;
+  _copy_sys_time = 0;
+
 
   // Now we know the number of regions and heap sizes, initialize the heuristics.
   initialize_heuristics_generations();
@@ -782,10 +786,38 @@ size_t ShenandoahHeap::copy_bytes_during_gc() {
   return Atomic::load(&_copy_bytes_during_gc); 
 }
 
+size_t ShenandoahHeap::copy_user_time() {
+  return _copy_user_time;
+}
+
+size_t ShenandoahHeap::copy_sys_time() {
+  return _copy_sys_time;
+}
+
+void ShenandoahHeap::set_copy_sys_time(size_t copy_sys_time) {
+  _copy_sys_time = copy_sys_time;
+}
+
+void ShenandoahHeap::set_copy_user_time(size_t copy_user_time) {
+  _copy_user_time = copy_user_time;
+}
+
+
 void ShenandoahHeap::reset_copy_bytes_during_gc() {
   Atomic::store(&_copy_bytes_during_gc, (size_t) 0);
 }
 
+void ShenandoahHeap::increase_scanned_objs_during_gc(size_t bytes) {
+  Atomic::add(&_scanned_objs_during_gc, bytes, memory_order_relaxed);
+}
+
+size_t ShenandoahHeap::scanned_objs_during_gc() {
+  return Atomic::load(&scanned_objs_during_gc); 
+}
+
+void ShenandoahHeap::reset_scanned_objs_during_gc() {
+  Atomic::store(&scanned_objs_during_gc, (size_t) 0);
+}
 // For tracking usage based on allocations, it should be the case that:
 // * The sum of regions::used == heap::used
 // * The sum of a generation's regions::used == generation::used
@@ -1748,6 +1780,8 @@ private:
   ShenandoahRegionIterator *_regions;
   bool _concurrent;
   uint _tenuring_threshold;
+public:
+  size_t volatile _user_time_total, _sys_time_total;
 
 public:
   ShenandoahGenerationalEvacuationTask(ShenandoahHeap* sh,
@@ -1757,14 +1791,25 @@ public:
     _sh(sh),
     _regions(iterator),
     _concurrent(concurrent),
-    _tenuring_threshold(0)
+    _tenuring_threshold(0),
+    _user_time_total(0),
+    _sys_time_total(0)
   {
+    _sh->set_copy_user_time(0);
+    _sh->set_copy_sys_time(0);
     if (_sh->mode()->is_generational()) {
       _tenuring_threshold = _sh->age_census()->tenuring_threshold();
     }
   }
 
+  ~ShenandoahGenerationalEvacuationTask(){
+    _sh->set_copy_user_time(_user_time_total);
+    _sh->set_copy_sys_time(_sys_time_total);
+  }
+
   void work(uint worker_id) {
+    size_t user_time = 0, sys_time = 0;
+    os::get_cur_thread_time(&user_time, &sys_time);
     if (_concurrent) {
       ShenandoahConcurrentWorkerSession worker_session(worker_id);
       ShenandoahSuspendibleThreadSetJoiner stsj(ShenandoahSuspendibleWorkers);
@@ -1775,6 +1820,10 @@ public:
       ShenandoahEvacOOMScope oom_evac_scope;
       do_work();
     }
+    size_t user_time_end = 0, sys_time_end = 0;
+    os::get_cur_thread_time(&user_time, &sys_time);
+    Atomic::add(&_user_time_total, user_time_end - user_time, memory_order_relaxed);
+    Atomic::add(&_sys_time_total, sys_time_end - sys_time, memory_order_relaxed);
   }
 
 private:
