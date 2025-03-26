@@ -484,6 +484,7 @@ void before_exit(JavaThread* thread, bool halt) {
   // Stop concurrent GC threads
   Universe::heap()->stop();
 
+  // log_info(gc) ("total_alloc_bytes: %ld", os::_total_alloc_bytes);
   // [gc breakdown]
   long majflt, minflt;
   os::get_accum_majflt_minflt(&majflt, &minflt);

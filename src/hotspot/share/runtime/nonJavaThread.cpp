@@ -22,6 +22,7 @@
  *
  */
 
+#include "logging/log.hpp"
 #include "precompiled.hpp"
 #include "gc/shared/barrierSet.hpp"
 #include "gc/shared/gcId.hpp"
@@ -113,6 +114,7 @@ void NonJavaThread::pre_run() {
 
 void NonJavaThread::post_run() {
   JFR_ONLY(Jfr::on_thread_exit(this);)
+  log_info(gc) ("Exit NonJavaThread");
   remove_from_the_list();
   unregister_thread_stack_with_NMT();
   // Ensure thread-local-storage is cleared before termination.

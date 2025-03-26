@@ -384,8 +384,13 @@ HeapWord* G1CollectedHeap::allocate_new_tlab(size_t min_size,
                                              size_t* actual_size) {
   assert_heap_not_locked_and_not_at_safepoint();
   assert(!is_humongous(requested_size), "we do not allow humongous TLABs");
-
-  return attempt_allocation(min_size, requested_size, actual_size);
+  HeapWord* res = attempt_allocation(min_size, requested_size, actual_size);
+  // if (res != nullptr) {
+  //   size_t bytes = requested_size * BytesPerWord;
+  //   Atomic::fetch_then_add(&os::_total_alloc_bytes, bytes, memory_order_relaxed);
+  // }
+  return res;
+  // return attempt_allocation(min_size, requested_size, actual_size);
 }
 
 HeapWord*
@@ -394,10 +399,22 @@ G1CollectedHeap::mem_allocate(size_t word_size,
   assert_heap_not_locked_and_not_at_safepoint();
 
   if (is_humongous(word_size)) {
-    return attempt_allocation_humongous(word_size);
+    HeapWord* res = attempt_allocation_humongous(word_size);
+    // if (res != nullptr) {
+    //   size_t bytes = word_size * BytesPerWord;
+    //   Atomic::fetch_then_add(&os::_total_alloc_bytes, bytes, memory_order_relaxed);
+    // }
+    return res;
+    // return attempt_allocation_humongous(word_size);
   }
   size_t dummy = 0;
-  return attempt_allocation(word_size, word_size, &dummy);
+  HeapWord* res = attempt_allocation(word_size, word_size, &dummy);
+  // if (res != nullptr) {
+  //   size_t bytes = word_size * BytesPerWord;
+  //   Atomic::fetch_then_add(&os::_total_alloc_bytes, bytes, memory_order_relaxed);
+  // }
+  return res;
+  // return attempt_allocation(word_size, word_size, &dummy);
 }
 
 HeapWord* G1CollectedHeap::attempt_allocation_slow(size_t word_size) {

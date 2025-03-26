@@ -21,6 +21,8 @@
  * questions.
  *
  */
+#include "gc/shenandoah/heuristics/shenandoahAdaptiveHeuristics.hpp"
+#include "logging/log.hpp"
 #include "precompiled.hpp"
 
 #include "gc/shenandoah/shenandoahFreeSet.hpp"
@@ -31,10 +33,15 @@
 #include "gc/shenandoah/shenandoahVerifier.hpp"
 #include "gc/shenandoah/shenandoahYoungGeneration.hpp"
 #include "gc/shenandoah/heuristics/shenandoahYoungHeuristics.hpp"
+#include <atomic>
+#include <cstddef>
 
 ShenandoahYoungGeneration::ShenandoahYoungGeneration(uint max_queues, size_t max_capacity, size_t soft_max_capacity) :
   ShenandoahGeneration(YOUNG, max_queues, max_capacity, soft_max_capacity),
   _old_gen_task_queues(nullptr) {
+    // std::atomic_init(&_bytes_allocated_buffer, 0);
+    // std::atomic_init(&_log_id, 0);
+    // std::atomic_init(&_total_bytes_allocated, 0);
 }
 
 void ShenandoahYoungGeneration::set_concurrent_mark_in_progress(bool in_progress) {
@@ -97,4 +104,27 @@ size_t ShenandoahYoungGeneration::available() const {
 size_t ShenandoahYoungGeneration::soft_available() const {
   size_t available = this->ShenandoahGeneration::soft_available();
   return MIN2(available, ShenandoahHeap::heap()->free_set()->available());
+}
+
+// const size_t LOG_THRESHOLD = 1UL * 1024 * 1024 * 1024; // 1g
+
+void ShenandoahYoungGeneration::increase_allocated_impl(size_t bytes) {
+  Atomic::add(&_bytes_allocated_since_gc_start, bytes, memory_order_relaxed);
+}
+
+void ShenandoahYoungGeneration::increase_used_impl(size_t bytes) {
+  Atomic::add(&_used, bytes);
+  // _total_bytes_allocated.fetch_add(bytes, std::memory_order_relaxed);
+
+  // size_t prev_bab = _bytes_allocated_buffer.fetch_add(bytes, std::memory_order_relaxed);
+  // size_t cur_bab = prev_bab + bytes;
+  // if (cur_bab >= LOG_THRESHOLD) {
+  //   if (_bytes_allocated_buffer.compare_exchange_weak(cur_bab, 0, std::memory_order_relaxed)) {
+  //     ShenandoahAdaptiveHeuristics* h = (ShenandoahAdaptiveHeuristics*) (this->_heuristics);
+  //     double rate = h->_allocation_rate_user.sample(cur_bab);
+  //     size_t total_bytes_allocated = _total_bytes_allocated.load(std::memory_order_relaxed);
+  //     log_info(gc) ("[%lu] Sample rate: %.0f %s/s, total_bytes: %lu %s", _log_id.load(std::memory_order_relaxed), byte_size_in_proper_unit(rate), proper_unit_for_byte_size(rate), byte_size_in_proper_unit(total_bytes_allocated), proper_unit_for_byte_size(total_bytes_allocated));
+  //     _log_id.fetch_add(1, std::memory_order_relaxed);
+  //   }
+  // }
 }

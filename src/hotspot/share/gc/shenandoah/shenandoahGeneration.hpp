@@ -31,6 +31,7 @@
 #include "gc/shenandoah/shenandoahGenerationType.hpp"
 #include "gc/shenandoah/shenandoahLock.hpp"
 #include "gc/shenandoah/shenandoahMarkingContext.hpp"
+#include <atomic>
 
 class ShenandoahHeapRegion;
 class ShenandoahHeapRegionClosure;
@@ -68,7 +69,6 @@ protected:
   size_t _soft_max_capacity;
 
   ShenandoahHeuristics* _heuristics;
-
 private:
   // Compute evacuation budgets prior to choosing collection set.
   void compute_evacuation_budgets(ShenandoahHeap* heap,
@@ -213,6 +213,9 @@ private:
   void confirm_heuristics_mode();
 
   virtual void record_success_concurrent(bool abbreviated);
+
+  virtual void increase_allocated_impl(size_t bytes) = 0;
+  virtual void increase_used_impl(size_t bytes) = 0;
 };
 
 #endif // SHARE_VM_GC_SHENANDOAH_SHENANDOAHGENERATION_HPP

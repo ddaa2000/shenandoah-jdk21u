@@ -24,6 +24,9 @@
  *
  */
 
+#include "gc/shenandoah/heuristics/shenandoahAdaptiveHeuristics.hpp"
+#include "gc/shenandoah/shenandoahGenerationType.hpp"
+#include "gc/shenandoah/shenandoahRegulatorThread.hpp"
 #include "precompiled.hpp"
 #include "gc/shenandoah/shenandoahCollectorPolicy.hpp"
 #include "gc/shenandoah/shenandoahConcurrentGC.hpp"
@@ -691,9 +694,22 @@ void ShenandoahControlThread::service_concurrent_cycle(ShenandoahHeap* heap,
                                                        bool do_old_gc_bootstrap) {
   ShenandoahConcurrentGC gc(generation, do_old_gc_bootstrap);
   os::dump_accum_thread_majflt_minflt_and_cputime("beforeConcCycle");
+  GCMajfltStats gc_majflt_stats;
+  gc_majflt_stats.start();
+  heap->reset_copy_bytes_during_gc();
+  // todo: reset timestamp
   if (gc.collect(cause)) {
     // Cycle is complete
     generation->record_success_concurrent(gc.abbreviated());
+    if (generation->is_young()) {
+      ShenandoahHeap* heap = ShenandoahHeap::heap();
+      ShenandoahRegulatorThread* regulator_thread = heap->_regulator_thread;
+      ShenandoahHeuristics* young_heuristics = regulator_thread->_young_heuristics;
+      // when ShenandoahGCHeuristics is not set, use the default value(ShenandoahAdaptiveHeuristics)
+      ShenandoahAdaptiveHeuristics* adaptive_heuristics = (ShenandoahAdaptiveHeuristics*) young_heuristics;
+      adaptive_heuristics->_copy_bytes_during_gc = heap->copy_bytes_during_gc();
+      adaptive_heuristics->print_info();
+    }
   } else {
     assert(heap->cancelled_gc(), "Must have been cancelled");
     check_cancellation_or_degen(gc.degen_point());
@@ -740,6 +756,7 @@ void ShenandoahControlThread::service_concurrent_cycle(ShenandoahHeap* heap,
                                  "At end of GC";
   }
   heap->log_heap_status(msg);
+  gc_majflt_stats.end_and_log("concurrent cycle");
   os::dump_accum_thread_majflt_minflt_and_cputime("afterConcCycle");
 }
 

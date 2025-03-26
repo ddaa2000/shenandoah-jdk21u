@@ -37,7 +37,9 @@
 #include "gc/shenandoah/shenandoahYoungGeneration.hpp"
 #include "gc/shenandoah/heuristics/shenandoahHeuristics.hpp"
 
+#include "runtime/atomic.hpp"
 #include "utilities/quickSort.hpp"
+#include <atomic>
 
 class ShenandoahResetUpdateRegionStateClosure : public ShenandoahHeapRegionClosure {
  private:
@@ -147,6 +149,7 @@ void ShenandoahGeneration::reset_bytes_allocated_since_gc_start() {
 }
 
 void ShenandoahGeneration::increase_allocated(size_t bytes) {
+  // increase_allocated_impl(bytes);
   Atomic::add(&_bytes_allocated_since_gc_start, bytes, memory_order_relaxed);
 }
 
@@ -910,7 +913,8 @@ void ShenandoahGeneration::establish_usage(size_t num_regions, size_t num_bytes,
 }
 
 void ShenandoahGeneration::increase_used(size_t bytes) {
-  Atomic::add(&_used, bytes);
+  // Atomic::add(&_used, bytes);
+  increase_used_impl(bytes);
 }
 
 void ShenandoahGeneration::increase_humongous_waste(size_t bytes) {

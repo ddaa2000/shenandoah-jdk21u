@@ -54,6 +54,27 @@ class ShenandoahAllocationRate : public CHeapObj<mtGC> {
   TruncatedSeq _rate_avg;
 };
 
+class ShenandoahAllocationRateUser : public CHeapObj<mtGC> {
+  public:
+   explicit ShenandoahAllocationRateUser();
+   void allocation_counter_reset();
+ 
+   double sample(size_t allocated);
+ 
+   double upper_bound(double sds) const;
+   bool is_spiking(double rate, double threshold) const;
+  private:
+ 
+   double instantaneous_rate(double time, size_t allocated) const;
+ 
+   // user time
+   double _last_sample_time;
+   size_t _last_sample_value;
+   double _interval_sec;
+   TruncatedSeq _rate;
+   TruncatedSeq _rate_avg;
+ };
+
 /*
  * The adaptive heuristic tracks the allocation behavior and average cycle
  * time of the application. It attempts to start a cycle with enough time
@@ -79,6 +100,7 @@ public:
   void record_success_concurrent(bool abbreviated);
   void record_success_degenerated();
   void record_success_full();
+  void print_info();
 
   virtual bool should_start_gc();
 
@@ -100,6 +122,7 @@ public:
   const static double HIGHEST_EXPECTED_AVAILABLE_AT_END;
 
   friend class ShenandoahAllocationRate;
+  friend class ShenandoahAllocationRateUser;
 
   // Used to record the last trigger that signaled to start a GC.
   // This itself is used to decide whether or not to adjust the margin of
@@ -113,8 +136,10 @@ public:
   void adjust_margin_of_error(double amount);
   void adjust_spike_threshold(double amount);
 
-protected:
+public:
   ShenandoahAllocationRate _allocation_rate;
+  ShenandoahAllocationRateUser _allocation_rate_user;
+  size_t _copy_bytes_during_gc;
 
   // The margin of error expressed in standard deviations to add to our
   // average cycle time and allocation rate. As this value increases we

@@ -62,6 +62,7 @@ const double ShenandoahAdaptiveHeuristics::MAXIMUM_CONFIDENCE = 3.291; // 99.9%
 
 ShenandoahAdaptiveHeuristics::ShenandoahAdaptiveHeuristics(ShenandoahSpaceInfo* space_info) :
   ShenandoahHeuristics(space_info),
+  _copy_bytes_during_gc(0),
   _margin_of_error_sd(ShenandoahAdaptiveInitialConfidence),
   _spike_threshold_sd(ShenandoahAdaptiveInitialSpikeThreshold),
   _last_trigger(OTHER),
@@ -130,6 +131,7 @@ void ShenandoahAdaptiveHeuristics::choose_collection_set_from_regiondata(Shenand
 void ShenandoahAdaptiveHeuristics::record_cycle_start() {
   ShenandoahHeuristics::record_cycle_start();
   _allocation_rate.allocation_counter_reset();
+  // _allocation_rate_user.allocation_counter_reset();
 }
 
 void ShenandoahAdaptiveHeuristics::record_success_concurrent(bool abbreviated) {
@@ -216,6 +218,8 @@ bool ShenandoahAdaptiveHeuristics::should_start_gc() {
 
   // Track allocation rate even if we decide to start a cycle for other reasons.
   double rate = _allocation_rate.sample(allocated);
+  // double rate_user = _allocation_rate_user.sample(allocated);
+  // log_info(gc)("Sampled Allocation rate: %lf", rate);
   _last_trigger = OTHER;
 
   size_t min_threshold = min_free_threshold();
@@ -405,4 +409,115 @@ double ShenandoahAllocationRate::instantaneous_rate(double time, size_t allocate
   size_t allocation_delta = (allocated > last_value) ? (allocated - last_value) : 0;
   double time_delta_sec = time - last_time;
   return (time_delta_sec > 0)  ? (allocation_delta / time_delta_sec) : 0;
+}
+
+ShenandoahAllocationRateUser::ShenandoahAllocationRateUser() :
+  _last_sample_value(0),
+  _interval_sec(1.0 / ShenandoahAdaptiveSampleFrequencyHz),
+  _rate(int(ShenandoahAdaptiveSampleSizeSeconds * ShenandoahAdaptiveSampleFrequencyHz), ShenandoahAdaptiveDecayFactor),
+  _rate_avg(int(ShenandoahAdaptiveSampleSizeSeconds * ShenandoahAdaptiveSampleFrequencyHz), ShenandoahAdaptiveDecayFactor) {
+    // double real_time, user_time, system_time;
+    // bool valid = os::getTimesSecs(&real_time, &user_time, &system_time);
+    // _last_sample_time = user_time;
+
+    // to record alloc_rate, only consider mutator thread(jthread)
+    long user_time = 0, system_time = 0;
+    os::get_accum_jthread_time_by_sub(&user_time, &system_time);
+    _last_sample_time = (double) user_time / 1000.0;
+}
+
+double ShenandoahAllocationRateUser::sample(size_t allocated) {
+  // double now = os::elapsedTime();
+  // double real_time, now, system_time;
+  // bool valid = os::getTimesSecs(&real_time, &now, &system_time);
+  long user_time = 0, system_time = 0;
+  os::get_accum_jthread_time_by_sub(&user_time, &system_time);
+  // size_t thread_exit_elapsed_time = os::thread_exit_elapsed_time();
+  // log_info(gc) ("thread_exit_elapsed_time: %lf", (double) thread_exit_elapsed_time / 1000000.0);
+  log_info(gc) ("get_accum_jthread_usertime: %lf", (double) user_time / 1000.0);
+  // double now = (double) user_time / 1000.0 + (double) thread_exit_elapsed_time / 1000000.0 ;
+  double now = (double) user_time / 1000.0;
+  double rate = 0.0;
+  log_info(gc) ("allocated: %lu, now: %lf, last_sample_time: %lf", allocated, now, _last_sample_time);
+  if (now - _last_sample_time > 0) {
+    // if (allocated >= _last_sample_value) {
+      // rate = instantaneous_rate(now, allocated);
+      rate = allocated * 1.0 / (now - _last_sample_time);
+      
+      // _rate.add(rate);
+      // _rate_avg.add(_rate.avg());
+    // }
+    _last_sample_time = now;
+    // _last_sample_value = allocated;
+  } else {
+    log_info(gc) ("now(%lf) <= last_sample_time(%lf)", now, _last_sample_time);
+  }
+  return rate;
+}
+
+double ShenandoahAllocationRateUser::upper_bound(double sds) const {
+  // Here we are using the standard deviation of the computed running
+  // average, rather than the standard deviation of the samples that went
+  // into the moving average. This is a much more stable value and is tied
+  // to the actual statistic in use (moving average over samples of averages).
+  return _rate.davg() + (sds * _rate_avg.dsd());
+}
+
+void ShenandoahAllocationRateUser::allocation_counter_reset() {
+  // double real_time, user_time, system_time;
+  // bool valid = os::getTimesSecs(&real_time, &user_time, &system_time);
+  // _last_sample_time = user_time;
+  long user_time = 0, system_time = 0;
+  os::get_accum_jthread_time_by_sub(&user_time, &system_time);
+  _last_sample_time = (double) user_time / 1000.0;
+  _last_sample_value = 0;
+}
+
+bool ShenandoahAllocationRateUser::is_spiking(double rate, double threshold) const {
+  if (rate <= 0.0) {
+    return false;
+  }
+
+  double sd = _rate.sd();
+  if (sd > 0) {
+    // There is a small chance that that rate has already been sampled, but it
+    // seems not to matter in practice.
+    double z_score = (rate - _rate.avg()) / sd;
+    if (z_score > threshold) {
+      return true;
+    }
+  }
+  return false;
+}
+
+double ShenandoahAllocationRateUser::instantaneous_rate(double time, size_t allocated) const {
+  size_t last_value = _last_sample_value;
+  double last_time = _last_sample_time;
+  size_t allocation_delta = (allocated > last_value) ? (allocated - last_value) : 0;
+  double time_delta_sec = time - last_time;
+  return (time_delta_sec > 0)  ? (allocation_delta / time_delta_sec) : 0;
+}
+
+void ShenandoahAdaptiveHeuristics::print_info() {
+  // double avg_cycle_time = _gc_cycle_time_history->davg() + (_margin_of_error_sd * _gc_cycle_time_history->dsd());
+  // log_info(gc)("%s: average GC time: %.2f ms, allocation rate: %.0f %s/s", 
+  //               _space_info->name(), avg_cycle_time * 1000, byte_size_in_proper_unit(avg_alloc_rate), proper_unit_for_byte_size(avg_alloc_rate));
+  // in milliseconds
+  double gc_cycle_time = elapsed_cycle_time() * 1000.0; // ticks
+  double gc_cycle_user_time = elapsed_cycle_user_time() * 1000.0; // njt user
+  double gc_cycle_total_time = elapsed_cycle_total_time() * 1000.0; // njt user + sys
+
+  size_t copy_bytes_during_gc = _copy_bytes_during_gc;
+  // double avg_alloc_rate = _allocation_rate.upper_bound(_margin_of_error_sd);
+  // only mutator thread
+  // double avg_alloc_rate_user = _allocation_rate_user.upper_bound(_margin_of_error_sd);
+  
+  // log_info(gc)("%s: [wall] GC time: %.2f ms, allocation rate: %.0f %s/s; [user] GC time: %.2f ms, allocation rate: %.0f %s/s", 
+  //                 _space_info->name(), gc_cycle_time * 1000, byte_size_in_proper_unit(avg_alloc_rate), proper_unit_for_byte_size(avg_alloc_rate), gc_cycle_user_time * 1000, byte_size_in_proper_unit(avg_alloc_rate_user), proper_unit_for_byte_size(avg_alloc_rate_user));
+  // log_info(gc) ("%s GC cost per byte:  [User]: %lf", _space_info->name())
+  if (copy_bytes_during_gc != 0) {
+    log_info(gc) ("copy_bytes_during_gc: %lu", copy_bytes_during_gc);
+    log_info(gc) ("gc_cycle_user_time: %lfms, gc_cycle_total_time: %lfms, gc_cycle_time: %lfms", gc_cycle_user_time, gc_cycle_total_time, gc_cycle_time);
+    log_info(gc) ("[User] cost_per_byte: %lfms; [User+Sys] cost_per_byte: %lfms; [Ticks] cost_per_byte: %lfms", gc_cycle_user_time / copy_bytes_during_gc, gc_cycle_total_time / copy_bytes_during_gc, gc_cycle_time / copy_bytes_during_gc);
+  }
 }

@@ -26,10 +26,14 @@
 #define SHARE_RUNTIME_OS_HPP
 
 #include "jvm_md.h"
+#include "logging/log.hpp"
+#include "runtime/atomic.hpp"
 #include "runtime/osInfo.hpp"
 #include "utilities/exceptions.hpp"
 #include "utilities/ostream.hpp"
 #include "utilities/macros.hpp"
+#include "utilities/ticks.hpp"
+#include <atomic>
 #ifdef __APPLE__
 # include <mach/mach_time.h>
 #endif
@@ -114,6 +118,8 @@ class Mutex;
 
 struct jvmtiTimerInfo;
 
+const size_t LOG_THRESHOLD = 5UL * 1024 * 1024 * 1024; // 5g
+
 template<class E> class GrowableArray;
 
 // %%%%% Moved ThreadState, START_FN, OSThread to new osThread.hpp. -- Rose
@@ -189,6 +195,17 @@ class os: AllStatic {
  private:
   static OSThread*          _starting_thread;
   static PageSizes          _page_sizes;
+ public:
+  static size_t             _thread_exit_elapsed_time;
+  static size_t             _total_alloc_bytes;
+  static size_t             _bytes_allocated_buffer;
+  static size_t             _log_id;
+  // user
+  static long               _last_sample_user_time;
+  // user + sys
+  static long               _last_sample_total_time;
+  // ticks
+  static long               _last_sample_ticks;
 
   static char*  pd_reserve_memory(size_t bytes, bool executable);
 
@@ -290,6 +307,10 @@ class os: AllStatic {
   static void dump_current_thread_majflt_minflt_and_cputime(const char *prefix);
   // Dump the number of page major fault, user and sys time of java and non-java threads since the start of jvm.
   static void dump_accum_thread_majflt_minflt_and_cputime(const char *prefix);
+  static void get_accum_njthread_time(long* user_time, long* sys_time);
+  static void get_accum_jthread_time(long* user_time, long* sys_time);
+  static void get_cur_thread_time(long* user_time, long* sys_time);
+  static void get_accum_jthread_time_by_sub(long* jt_user_time, long* jt_sys_time);
 
   // Return current local time in a string (YYYY-MM-DD HH:MM:SS).
   // It is MT safe, but not async-safe, as reading time zone
@@ -354,6 +375,15 @@ class os: AllStatic {
   static int initial_active_processor_count() {
     assert(_initial_active_processor_count > 0, "Initial active processor count not set yet.");
     return _initial_active_processor_count;
+  }
+
+  static void add_thread_exit_elapsed_time(size_t time) {
+    size_t after = Atomic::add(&_thread_exit_elapsed_time, time, memory_order_relaxed);
+    // log_info(gc) ("[thread_exit_elapsed_time] before: %lu, after: %lu", after - time, after);
+  }
+
+  static size_t thread_exit_elapsed_time() {
+    return _thread_exit_elapsed_time;
   }
 
   // Give a name to the current thread.

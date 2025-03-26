@@ -726,10 +726,15 @@ void JavaThread::thread_main_inner() {
 
 // Shared teardown for all JavaThreads
 void JavaThread::post_run() {
-  long majflt, minflt, user_time, sys_time;
-  os::current_thread_majflt_minflt_and_cputime(&majflt, &minflt, &user_time, &sys_time);
-  log_info(gc, thread)("Exit JavaThread %s(tid=%d), Majflt=%ld, Minflt=%ld, user=%ldms, sys=%ldms",
-    this->name(), Thread::current()->osthread()->thread_id(), majflt, minflt, user_time, sys_time);
+  // long majflt, minflt, user_time, sys_time;
+  long user_time, sys_time;
+  // os::current_thread_majflt_minflt_and_cputime(&majflt, &minflt, &user_time, &sys_time);
+  os::get_cur_thread_time(&user_time, &sys_time);
+  // log_info(gc, thread)("Exit JavaThread %s(tid=%d), Majflt=%ld, Minflt=%ld, user=%lfms, sys=%lfms",
+    // this->name(), Thread::current()->osthread()->thread_id(), majflt, minflt, user_time  / 1000000.0, sys_time / 1000000.0);
+  log_info(gc, thread) ("Exit JavaThread %s(tid=%d), user=%lfms, sys=%lfms", this->name(), Thread::current()->osthread()->thread_id(), user_time  / 1000.0, sys_time / 1000.0);
+
+  // os::add_thread_exit_elapsed_time(user_time);
   this->exit(false);
   this->unregister_thread_stack_with_NMT();
   // Defer deletion to here to ensure 'this' is still referenceable in call_run

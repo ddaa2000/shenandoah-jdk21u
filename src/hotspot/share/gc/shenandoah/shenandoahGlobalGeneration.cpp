@@ -122,3 +122,11 @@ void ShenandoahGlobalGeneration::set_mark_incomplete() {
   heap->young_generation()->set_mark_incomplete();
   heap->old_generation()->set_mark_incomplete();
 }
+
+void ShenandoahGlobalGeneration::increase_allocated_impl(size_t bytes) {
+  Atomic::add(&_bytes_allocated_since_gc_start, bytes, memory_order_relaxed);
+}
+
+void ShenandoahGlobalGeneration::increase_used_impl(size_t bytes) {
+  Atomic::add(&_used, bytes);
+}

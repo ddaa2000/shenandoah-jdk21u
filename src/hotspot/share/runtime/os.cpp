@@ -74,6 +74,7 @@
 #include "utilities/defaultStream.hpp"
 #include "utilities/events.hpp"
 #include "utilities/powerOfTwo.hpp"
+#include "utilities/ticks.hpp"
 
 #ifndef _WINDOWS
 # include <poll.h>
@@ -87,6 +88,13 @@ volatile unsigned int os::_rand_seed      = 1234567;
 int               os::_processor_count    = 0;
 int               os::_initial_active_processor_count = 0;
 os::PageSizes     os::_page_sizes;
+size_t            os::_thread_exit_elapsed_time = 0;
+size_t            os::_total_alloc_bytes = 0;
+size_t            os::_bytes_allocated_buffer = 0;
+size_t            os::_log_id = 0;
+long              os::_last_sample_user_time = 0;
+long              os::_last_sample_total_time = 0;
+long              os::_last_sample_ticks = 0;
 
 DEBUG_ONLY(bool os::_mutex_init_done = false;)
 

@@ -466,3 +466,11 @@ void ShenandoahOldGeneration::record_success_concurrent(bool abbreviated) {
   heuristics()->record_success_concurrent(abbreviated);
   ShenandoahHeap::heap()->shenandoah_policy()->record_success_old();
 }
+
+void ShenandoahOldGeneration::increase_allocated_impl(size_t bytes) {
+  Atomic::add(&_bytes_allocated_since_gc_start, bytes, memory_order_relaxed);
+}
+
+void ShenandoahOldGeneration::increase_used_impl(size_t bytes) {
+  Atomic::add(&_used, bytes);
+}

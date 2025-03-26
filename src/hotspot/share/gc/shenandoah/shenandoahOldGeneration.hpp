@@ -82,6 +82,9 @@ public:
   // the performance impact would be too severe.
   void transfer_pointers_from_satb();
 
+  void increase_allocated_impl(size_t bytes) override;
+  void increase_used_impl(size_t bytes) override;
+
 public:
   enum State {
     FILLING, WAITING_FOR_BOOTSTRAP, BOOTSTRAPPING, MARKING, EVACUATING
