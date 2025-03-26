@@ -200,6 +200,7 @@ jint ShenandoahHeap::initialize() {
   _scanned_objs_during_gc = 0;
   _copy_user_time = 0;
   _copy_sys_time = 0;
+  _copy_wall_time = 0;
 
 
   // Now we know the number of regions and heap sizes, initialize the heuristics.
@@ -797,6 +798,15 @@ size_t ShenandoahHeap::copy_sys_time() {
 void ShenandoahHeap::set_copy_sys_time(size_t copy_sys_time) {
   _copy_sys_time = copy_sys_time;
 }
+
+size_t ShenandoahHeap::copy_wall_time() {
+  return _copy_wall_time;
+}
+
+void ShenandoahHeap::set_copy_wall_time(size_t copy_wall_time) {
+  _copy_wall_time = copy_wall_time;
+}
+
 
 void ShenandoahHeap::set_copy_user_time(size_t copy_user_time) {
   _copy_user_time = copy_user_time;
@@ -1783,6 +1793,8 @@ private:
 public:
   size_t volatile _user_time_total, _sys_time_total;
 
+  size_t _wall_start;
+
 public:
   ShenandoahGenerationalEvacuationTask(ShenandoahHeap* sh,
                                        ShenandoahRegionIterator* iterator,
@@ -1797,14 +1809,17 @@ public:
   {
     _sh->set_copy_user_time(0);
     _sh->set_copy_sys_time(0);
+    _sh->set_copy_wall_time(0);
     if (_sh->mode()->is_generational()) {
       _tenuring_threshold = _sh->age_census()->tenuring_threshold();
     }
+    _wall_start = os::elapsedTime();
   }
 
   ~ShenandoahGenerationalEvacuationTask(){
     _sh->set_copy_user_time(_user_time_total);
     _sh->set_copy_sys_time(_sys_time_total);
+    _sh->set_copy_wall_time(os::elapsedTime() - _wall_start);
   }
 
   void work(uint worker_id) {
