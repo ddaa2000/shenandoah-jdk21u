@@ -1793,7 +1793,7 @@ private:
 public:
   size_t volatile _user_time_total, _sys_time_total;
 
-  size_t _wall_start;
+  double _wall_start;
 
 public:
   ShenandoahGenerationalEvacuationTask(ShenandoahHeap* sh,
@@ -1837,8 +1837,8 @@ public:
     }
     long user_time_end = 0, sys_time_end = 0;
     os::get_cur_thread_time(&user_time_end, &sys_time_end);
-    Atomic::add(&_user_time_total, (size_t)(user_time_end - user_time), memory_order_relaxed);
-    Atomic::add(&_sys_time_total, (size_t)(sys_time_end - sys_time), memory_order_relaxed);
+    Atomic::add(&_user_time_total, (size_t)(user_time_end - user_time));
+    Atomic::add(&_sys_time_total, (size_t)(sys_time_end - sys_time));
   }
 
 private:
