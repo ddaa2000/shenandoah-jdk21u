@@ -822,11 +822,11 @@ void ShenandoahHeap::increase_scanned_objs_during_gc(size_t bytes) {
 }
 
 size_t ShenandoahHeap::scanned_objs_during_gc() {
-  return Atomic::load(&scanned_objs_during_gc); 
+  return Atomic::load(&_scanned_objs_during_gc); 
 }
 
 void ShenandoahHeap::reset_scanned_objs_during_gc() {
-  Atomic::store(&scanned_objs_during_gc, (size_t) 0);
+  Atomic::store(&_scanned_objs_during_gc, (size_t) 0);
 }
 // For tracking usage based on allocations, it should be the case that:
 // * The sum of regions::used == heap::used
@@ -1823,7 +1823,7 @@ public:
   }
 
   void work(uint worker_id) {
-    size_t user_time = 0, sys_time = 0;
+    long user_time = 0, sys_time = 0;
     os::get_cur_thread_time(&user_time, &sys_time);
     if (_concurrent) {
       ShenandoahConcurrentWorkerSession worker_session(worker_id);
@@ -1835,10 +1835,10 @@ public:
       ShenandoahEvacOOMScope oom_evac_scope;
       do_work();
     }
-    size_t user_time_end = 0, sys_time_end = 0;
-    os::get_cur_thread_time(&user_time, &sys_time);
-    Atomic::add(&_user_time_total, user_time_end - user_time, memory_order_relaxed);
-    Atomic::add(&_sys_time_total, sys_time_end - sys_time, memory_order_relaxed);
+    long user_time_end = 0, sys_time_end = 0;
+    os::get_cur_thread_time(&user_time_end, &sys_time_end);
+    Atomic::add(&_user_time_total, (size_t)(user_time_end - user_time), memory_order_relaxed);
+    Atomic::add(&_sys_time_total, (size_t)(sys_time_end - sys_time), memory_order_relaxed);
   }
 
 private:

@@ -504,7 +504,7 @@ void ShenandoahAdaptiveHeuristics::print_info() {
   //               _space_info->name(), avg_cycle_time * 1000, byte_size_in_proper_unit(avg_alloc_rate), proper_unit_for_byte_size(avg_alloc_rate));
   // in milliseconds
   ShenandoahHeap* heap = ShenandoahHeap::heap();
-  double gc_cycle_time = heap->_copy_wall_time() * 1000.0;
+  double gc_cycle_time = heap->copy_wall_time() * 1000.0;
   // elapsed_cycle_time() * 1000.0; // ticks
   double gc_cycle_user_time = (heap->copy_user_time() + heap->copy_sys_time()) / 1000.0; // njt user
   double gc_cycle_total_time = heap->copy_user_time() / 1000.0; // njt user + sys
