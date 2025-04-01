@@ -1819,7 +1819,7 @@ public:
   ~ShenandoahGenerationalEvacuationTask(){
     _sh->set_copy_user_time(_user_time_total);
     _sh->set_copy_sys_time(_sys_time_total);
-    _sh->set_copy_wall_time(os::elapsedTime() - _wall_start);
+    _sh->set_copy_wall_time((os::elapsedTime() - _wall_start) * 1000 * 1000);
   }
 
   void work(uint worker_id) {
@@ -1837,6 +1837,10 @@ public:
     }
     long user_time_end = 0, sys_time_end = 0;
     os::get_cur_thread_time(&user_time_end, &sys_time_end);
+    // log_info(gc)("gc_copy_user_imm: %lu, gc_copy_sys_imm: %lu", 
+    //   (size_t)(user_time_end - user_time), (size_t)(sys_time_end - sys_time));
+    log_info(gc)("gc_copy_user_imm: %lu, gc_copy_sys_imm: %lu", 
+      (size_t)user_time_end, (size_t)sys_time_end);
     Atomic::add(&_user_time_total, (size_t)(user_time_end - user_time));
     Atomic::add(&_sys_time_total, (size_t)(sys_time_end - sys_time));
   }
