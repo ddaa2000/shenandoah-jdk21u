@@ -197,6 +197,11 @@ jint ShenandoahHeap::initialize() {
   _committed = _initial_size;
 
   _copy_bytes_during_gc = 0;
+  _scanned_objs_during_gc = 0;
+  _copy_user_time = 0;
+  _copy_sys_time = 0;
+  _copy_wall_time = 0;
+
 
   // Now we know the number of regions and heap sizes, initialize the heuristics.
   initialize_heuristics_generations();
@@ -787,10 +792,47 @@ size_t ShenandoahHeap::copy_bytes_during_gc() {
   return Atomic::load(&_copy_bytes_during_gc); 
 }
 
+size_t ShenandoahHeap::copy_user_time() {
+  return _copy_user_time;
+}
+
+size_t ShenandoahHeap::copy_sys_time() {
+  return _copy_sys_time;
+}
+
+void ShenandoahHeap::set_copy_sys_time(size_t copy_sys_time) {
+  _copy_sys_time = copy_sys_time;
+}
+
+size_t ShenandoahHeap::copy_wall_time() {
+  return _copy_wall_time;
+}
+
+void ShenandoahHeap::set_copy_wall_time(size_t copy_wall_time) {
+  _copy_wall_time = copy_wall_time;
+}
+
+
+void ShenandoahHeap::set_copy_user_time(size_t copy_user_time) {
+  _copy_user_time = copy_user_time;
+}
+
+
 void ShenandoahHeap::reset_copy_bytes_during_gc() {
   Atomic::store(&_copy_bytes_during_gc, (size_t) 0);
 }
 
+void ShenandoahHeap::increase_scanned_objs_during_gc(size_t bytes) {
+  Atomic::add(&_scanned_objs_during_gc, bytes, memory_order_relaxed);
+}
+
+size_t ShenandoahHeap::scanned_objs_during_gc() {
+  return Atomic::load(&_scanned_objs_during_gc); 
+}
+
+void ShenandoahHeap::reset_scanned_objs_during_gc() {
+  Atomic::store(&_scanned_objs_during_gc, (size_t) 0);
+}
 // For tracking usage based on allocations, it should be the case that:
 // * The sum of regions::used == heap::used
 // * The sum of a generation's regions::used == generation::used
@@ -1753,6 +1795,10 @@ private:
   ShenandoahRegionIterator *_regions;
   bool _concurrent;
   uint _tenuring_threshold;
+public:
+  size_t volatile _user_time_total, _sys_time_total;
+
+  double _wall_start;
 
 public:
   ShenandoahGenerationalEvacuationTask(ShenandoahHeap* sh,
@@ -1762,14 +1808,28 @@ public:
     _sh(sh),
     _regions(iterator),
     _concurrent(concurrent),
-    _tenuring_threshold(0)
+    _tenuring_threshold(0),
+    _user_time_total(0),
+    _sys_time_total(0)
   {
+    _sh->set_copy_user_time(0);
+    _sh->set_copy_sys_time(0);
+    _sh->set_copy_wall_time(0);
     if (_sh->mode()->is_generational()) {
       _tenuring_threshold = _sh->age_census()->tenuring_threshold();
     }
+    _wall_start = os::elapsedTime();
+  }
+
+  ~ShenandoahGenerationalEvacuationTask(){
+    _sh->set_copy_user_time(_user_time_total);
+    _sh->set_copy_sys_time(_sys_time_total);
+    _sh->set_copy_wall_time((os::elapsedTime() - _wall_start) * 1000 * 1000);
   }
 
   void work(uint worker_id) {
+    long user_time = 0, sys_time = 0;
+    os::get_cur_thread_time(&user_time, &sys_time);
     if (_concurrent) {
       ShenandoahConcurrentWorkerSession worker_session(worker_id);
       ShenandoahSuspendibleThreadSetJoiner stsj(ShenandoahSuspendibleWorkers);
@@ -1780,6 +1840,14 @@ public:
       ShenandoahEvacOOMScope oom_evac_scope;
       do_work();
     }
+    long user_time_end = 0, sys_time_end = 0;
+    os::get_cur_thread_time(&user_time_end, &sys_time_end);
+    // log_info(gc)("gc_copy_user_imm: %lu, gc_copy_sys_imm: %lu", 
+    //   (size_t)(user_time_end - user_time), (size_t)(sys_time_end - sys_time));
+    log_info(gc)("gc_copy_user_imm: %lu, gc_copy_sys_imm: %lu", 
+      (size_t)user_time_end, (size_t)sys_time_end);
+    Atomic::add(&_user_time_total, (size_t)(user_time_end - user_time));
+    Atomic::add(&_sys_time_total, (size_t)(sys_time_end - sys_time));
   }
 
 private:
