@@ -213,7 +213,6 @@
   //  WeakProcessorTimes _weak_phase_times;
  
    double worker_time(GCParPhases phase, uint worker);
-   void reset();
  
    template <class T>
    void details(T* phase, uint indent_level) const;
@@ -243,6 +242,7 @@
  
   public:
    ShenandoahGCPhaseTimes(uint max_gc_threads);
+   void reset();
    void record_gc_pause_start();
    void record_gc_pause_end();
    void print(bool evacuation_failed);

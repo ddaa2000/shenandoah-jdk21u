@@ -642,9 +642,6 @@ void ShenandoahHeapRegion::oop_iterate_humongous_slice(OopIterateClosure* blk, b
     // Scan all data, regardless of whether cards are dirty
     obj->oop_iterate(blk, MemRegion(start, start + num_cards * CardTable::card_size_in_words()));
   }
-
-  ShenandoahGCPhaseTimes * phase_times = ShenandoahGCPhaseTimes::heap()->get_phase_times();
-  phase_times->record_or_add_thread_work_item(ShenandoahGCPhaseTimes::ScanHR, worker)
 }
 
 void ShenandoahHeapRegion::oop_iterate_humongous(OopIterateClosure* blk, HeapWord* start, size_t words) {
