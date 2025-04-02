@@ -600,7 +600,7 @@ void ShenandoahHeapRegion::global_oop_iterate_objects_and_fill_dead(OopIterateCl
 // DO NOT CANCEL.  If this worker thread has accepted responsibility for scanning a particular range of addresses, it
 // must finish the work before it can be cancelled.
 void ShenandoahHeapRegion::oop_iterate_humongous_slice(OopIterateClosure* blk, bool dirty_only,
-                                                       HeapWord* start, size_t words, bool write_table) {
+                                                       HeapWord* start, size_t words, bool write_table, size_t* counter) {
   assert(words % CardTable::card_size_in_words() == 0, "Humongous iteration must span whole number of cards");
   assert(is_humongous(), "only humongous region here");
   ShenandoahHeap* heap = ShenandoahHeap::heap();
@@ -621,6 +621,9 @@ void ShenandoahHeapRegion::oop_iterate_humongous_slice(OopIterateClosure* blk, b
       while (num_cards-- > 0) {
         if (scanner->is_write_card_dirty(card_index++)) {
           obj->oop_iterate(blk, MemRegion(start, start + CardTable::card_size_in_words()));
+          if(counter != nullptr){
+            (*counter)++;
+          }
         }
         start += CardTable::card_size_in_words();
       }
@@ -628,6 +631,9 @@ void ShenandoahHeapRegion::oop_iterate_humongous_slice(OopIterateClosure* blk, b
       while (num_cards-- > 0) {
         if (scanner->is_card_dirty(card_index++)) {
           obj->oop_iterate(blk, MemRegion(start, start + CardTable::card_size_in_words()));
+          if(counter != nullptr){
+            (*counter)++;
+          }
         }
         start += CardTable::card_size_in_words();
       }
@@ -636,6 +642,9 @@ void ShenandoahHeapRegion::oop_iterate_humongous_slice(OopIterateClosure* blk, b
     // Scan all data, regardless of whether cards are dirty
     obj->oop_iterate(blk, MemRegion(start, start + num_cards * CardTable::card_size_in_words()));
   }
+
+  ShenandoahGCPhaseTimes * phase_times = ShenandoahGCPhaseTimes::heap()->get_phase_times();
+  phase_times->record_or_add_thread_work_item(ShenandoahGCPhaseTimes::ScanHR, worker)
 }
 
 void ShenandoahHeapRegion::oop_iterate_humongous(OopIterateClosure* blk, HeapWord* start, size_t words) {

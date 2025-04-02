@@ -547,7 +547,7 @@ ShenandoahScanRemembered<RememberedSet>::mark_range_as_empty(HeapWord *addr, siz
 template<typename RememberedSet>
 template <typename ClosureType>
 void ShenandoahScanRemembered<RememberedSet>::process_clusters(size_t first_cluster, size_t count, HeapWord* end_of_range,
-                                                               ClosureType* cl, bool use_write_table, uint worker_id) {
+                                                               ClosureType* cl, bool use_write_table, uint worker_id, size_t* counter) {
 
   // If old-gen evacuation is active, then MarkingContext for old-gen heap regions is valid.  We use the MarkingContext
   // bits to determine which objects within a DIRTY card need to be scanned.  This is necessary because old-gen heap
@@ -653,6 +653,9 @@ void ShenandoahScanRemembered<RememberedSet>::process_clusters(size_t first_clus
       assert(ctbm[dirty_r] == CardTable::dirty_card_val(), "Last card in range should be dirty");
       // Record alternations, dirty run length, and dirty card count
       NOT_PRODUCT(stats.record_dirty_run(dirty_r - dirty_l + 1);)
+      if(counter != nullptr){
+        (*counter) += dirty_r - dirty_l + 1;
+      }
 
       // Find first object that starts this range:
       // [left, right) is a maximal right-open interval of dirty cards
@@ -792,7 +795,7 @@ template<typename RememberedSet>
 template <typename ClosureType>
 inline void
 ShenandoahScanRemembered<RememberedSet>::process_humongous_clusters(ShenandoahHeapRegion* r, size_t first_cluster, size_t count,
-                                                                    HeapWord *end_of_range, ClosureType *cl, bool use_write_table) {
+                                                                    HeapWord *end_of_range, ClosureType *cl, bool use_write_table, size_t* counter) {
   ShenandoahHeapRegion* start_region = r->humongous_start_region();
   HeapWord* p = start_region->bottom();
   oop obj = cast_to_oop(p);
@@ -803,7 +806,7 @@ ShenandoahScanRemembered<RememberedSet>::process_humongous_clusters(ShenandoahHe
   size_t first_card_index = first_cluster * ShenandoahCardCluster<RememberedSet>::CardsPerCluster;
   HeapWord* first_cluster_addr = _rs->addr_for_card_index(first_card_index);
   size_t spanned_words = count * ShenandoahCardCluster<RememberedSet>::CardsPerCluster * CardTable::card_size_in_words();
-  start_region->oop_iterate_humongous_slice(cl, true, first_cluster_addr, spanned_words, use_write_table);
+  start_region->oop_iterate_humongous_slice(cl, true, first_cluster_addr, spanned_words, use_write_table, counter);
 }
 
 
@@ -813,7 +816,7 @@ template <typename ClosureType>
 inline void
 ShenandoahScanRemembered<RememberedSet>::process_region_slice(ShenandoahHeapRegion *region, size_t start_offset, size_t clusters,
                                                               HeapWord *end_of_range, ClosureType *cl, bool use_write_table,
-                                                              uint worker_id) {
+                                                              uint worker_id, size_t* counter) {
 
   // This is called only for young gen collection, when we scan old gen regions
   assert(region->is_old(), "Expecting an old region");
@@ -856,7 +859,7 @@ ShenandoahScanRemembered<RememberedSet>::process_region_slice(ShenandoahHeapRegi
       // TODO: ysr : This will be called multiple times with same start_region, but different start_cluster_no.
       // Check that it does the right thing here, and doesn't do redundant work. Also see if the call API/interface
       // can be simplified.
-      process_humongous_clusters(start_region, start_cluster_no, clusters, end_of_range, cl, use_write_table);
+      process_humongous_clusters(start_region, start_cluster_no, clusters, end_of_range, cl, use_write_table, counter);
     } else {
       // TODO: ysr The start_of_range calculated above is discarded and may be calculated again in process_clusters().
       // See if the redundant and wasted calculations can be avoided, and if the call parameters can be cleaned up.
@@ -866,7 +869,7 @@ ShenandoahScanRemembered<RememberedSet>::process_region_slice(ShenandoahHeapRegi
       // by all workers. Note that there are also task methods which call these which may have per worker storage.
       // We need to be careful however that if the number of workers changes dynamically that state isn't sequestered
       // and become obsolete.
-      process_clusters(start_cluster_no, clusters, end_of_range, cl, use_write_table, worker_id);
+      process_clusters(start_cluster_no, clusters, end_of_range, cl, use_write_table, worker_id, counter);
     }
   }
 }

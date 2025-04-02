@@ -624,6 +624,7 @@ void ShenandoahConcurrentGC::op_reset() {
     heap->pacer()->setup_for_reset();
   }
   _generation->prepare_gc();
+  heap->phase_times()->reset();
 }
 
 class ShenandoahInitMarkUpdateRegionStateClosure : public ShenandoahHeapRegionClosure {
