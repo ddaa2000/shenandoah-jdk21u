@@ -523,3 +523,32 @@ void ShenandoahAdaptiveHeuristics::print_info() {
     log_info(gc) ("[User] cost_per_byte: %lfms; [User+Sys] cost_per_byte: %lfms; [Ticks] cost_per_byte: %lfms", gc_cycle_user_time / copy_bytes_during_gc, gc_cycle_total_time / copy_bytes_during_gc, gc_cycle_time / copy_bytes_during_gc);
   }
 }
+
+bool ShenandoahPhaseDependentSeq::enough_samples_to_use_mixed_seq() const {
+  return ShenandoahAnalytics::enough_samples_available(&_mixed_seq);
+}
+
+ShenandoahPhaseDependentSeq::ShenandoahPhaseDependentSeq(int length) :
+  _young_only_seq(length),
+  _mixed_seq(length)
+{ }
+
+TruncatedSeq* ShenandoahPhaseDependentSeq::seq_raw(bool use_young_only_phase_seq) {
+  return use_young_only_phase_seq ? &_young_only_seq : &_mixed_seq;
+}
+
+void ShenandoahPhaseDependentSeq::set_initial(double value) {
+  _young_only_seq.add(value);
+}
+
+void ShenandoahPhaseDependentSeq::add(double value, bool for_young_only_phase) {
+  seq_raw(for_young_only_phase)->add(value);
+}
+
+double ShenandoahPhaseDependentSeq::predict(const ShenandoahPredictions* predictor, bool use_young_only_phase_seq) const {
+  if (use_young_only_phase_seq || !enough_samples_to_use_mixed_seq()) {
+    return predictor->predict(&_young_only_seq);
+  } else {
+    return predictor->predict(&_mixed_seq);
+  }
+}

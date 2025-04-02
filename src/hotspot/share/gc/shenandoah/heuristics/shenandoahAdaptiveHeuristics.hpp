@@ -75,6 +75,64 @@ class ShenandoahAllocationRateUser : public CHeapObj<mtGC> {
    TruncatedSeq _rate_avg;
  };
 
+ class ShenandoahPredictions {
+  private:
+   double _sigma;
+ 
+   // This function is used to estimate the stddev of sample sets. There is some
+   // special consideration of small sample sets: the actual stddev for them is
+   // not very useful, so we calculate some value based on the sample average.
+   // Five or more samples yields zero (at that point we use the stddev); fewer
+   // scale the sample set average linearly from two times the average to 0.5 times
+   // it.
+   double stddev_estimate(TruncatedSeq const* seq) const {
+     double estimate = seq->dsd();
+     int const samples = seq->num();
+     if (samples < 5) {
+       estimate = MAX2(seq->davg() * (5 - samples) / 2.0, estimate);
+     }
+     return estimate;
+   }
+  public:
+   ShenandoahPredictions(double sigma) : _sigma(sigma) {
+     assert(sigma >= 0.0, "Confidence must be larger than or equal to zero");
+   }
+ 
+   // Confidence factor.
+   double sigma() const { return _sigma; }
+ 
+   double predict(TruncatedSeq const* seq) const {
+     return seq->davg() + _sigma * stddev_estimate(seq);
+   }
+ 
+   double predict_in_unit_interval(TruncatedSeq const* seq) const {
+     return clamp(predict(seq), 0.0, 1.0);
+   }
+ 
+   double predict_zero_bounded(TruncatedSeq const* seq) const {
+     return MAX2(predict(seq), 0.0);
+   }
+ };
+
+ class ShenandoahPhaseDependentSeq {
+  TruncatedSeq _young_only_seq;
+  TruncatedSeq _mixed_seq;
+
+  NONCOPYABLE(ShenandoahPhaseDependentSeq);
+
+  TruncatedSeq* seq_raw(bool use_young_only_phase_seq);
+
+  bool enough_samples_to_use_mixed_seq() const;
+public:
+
+  ShenandoahPhaseDependentSeq(int length);
+
+  void set_initial(double value);
+  void add(double value, bool for_young_only_phase);
+
+  double predict(const ShenandoahPredictions* predictor, bool use_young_only_phase_seq) const;
+};
+
 /*
  * The adaptive heuristic tracks the allocation behavior and average cycle
  * time of the application. It attempts to start a cycle with enough time
