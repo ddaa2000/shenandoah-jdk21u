@@ -585,7 +585,7 @@ static double non_young_other_cost_per_region_ms_defaults[] = {
   1.0, 0.7, 0.7, 0.5, 0.5, 0.42, 0.42, 0.30
 };
 
-G1Analytics::G1Analytics(const G1Predictions* predictor) :
+ShenandoahAnalytics::ShenandoahAnalytics(const ShenandoahPredictions* predictor) :
     _predictor(predictor),
     _recent_gc_times_ms(NumPrevPausesForHeuristics),
     _concurrent_mark_remark_times_ms(NumPrevPausesForHeuristics),
@@ -640,47 +640,47 @@ G1Analytics::G1Analytics(const G1Predictions* predictor) :
   _concurrent_mark_cleanup_times_ms.add(0.20);
 }
 
-bool G1Analytics::enough_samples_available(TruncatedSeq const* seq) {
+bool ShenandoahAnalytics::enough_samples_available(TruncatedSeq const* seq) {
   return seq->num() >= 3;
 }
 
-double G1Analytics::predict_in_unit_interval(TruncatedSeq const* seq) const {
+double ShenandoahAnalytics::predict_in_unit_interval(TruncatedSeq const* seq) const {
   return _predictor->predict_in_unit_interval(seq);
 }
 
-size_t G1Analytics::predict_size(TruncatedSeq const* seq) const {
+size_t ShenandoahAnalytics::predict_size(TruncatedSeq const* seq) const {
   return (size_t)predict_zero_bounded(seq);
 }
 
-double G1Analytics::predict_zero_bounded(TruncatedSeq const* seq) const {
+double ShenandoahAnalytics::predict_zero_bounded(TruncatedSeq const* seq) const {
   return _predictor->predict_zero_bounded(seq);
 }
 
-double G1Analytics::predict_in_unit_interval(G1PhaseDependentSeq const* seq, bool for_young_only_phase) const {
+double ShenandoahAnalytics::predict_in_unit_interval(ShenandoahPhaseDependentSeq const* seq, bool for_young_only_phase) const {
   return clamp(seq->predict(_predictor, for_young_only_phase), 0.0, 1.0);
 }
 
-size_t G1Analytics::predict_size(G1PhaseDependentSeq const* seq, bool for_young_only_phase) const {
+size_t ShenandoahAnalytics::predict_size(ShenandoahPhaseDependentSeq const* seq, bool for_young_only_phase) const {
   return (size_t)predict_zero_bounded(seq, for_young_only_phase);
 }
 
-double G1Analytics::predict_zero_bounded(G1PhaseDependentSeq const* seq, bool for_young_only_phase) const {
+double ShenandoahAnalytics::predict_zero_bounded(ShenandoahPhaseDependentSeq const* seq, bool for_young_only_phase) const {
   return MAX2(seq->predict(_predictor, for_young_only_phase), 0.0);
 }
 
-int G1Analytics::num_alloc_rate_ms() const {
+int ShenandoahAnalytics::num_alloc_rate_ms() const {
   return _alloc_rate_ms_seq.num();
 }
 
-void G1Analytics::report_concurrent_mark_remark_times_ms(double ms) {
+void ShenandoahAnalytics::report_concurrent_mark_remark_times_ms(double ms) {
   _concurrent_mark_remark_times_ms.add(ms);
 }
 
-void G1Analytics::report_alloc_rate_ms(double alloc_rate) {
+void ShenandoahAnalytics::report_alloc_rate_ms(double alloc_rate) {
   _alloc_rate_ms_seq.add(alloc_rate);
 }
 
-void G1Analytics::compute_pause_time_ratios(double end_time_sec, double pause_time_ms) {
+void ShenandoahAnalytics::compute_pause_time_ratios(double end_time_sec, double pause_time_ms) {
   double long_interval_ms = (end_time_sec - oldest_known_gc_end_time_sec()) * 1000.0;
   double gc_pause_time_ms = _recent_gc_times_ms.sum() - _recent_gc_times_ms.oldest() + pause_time_ms;
   _long_term_pause_time_ratio = gc_pause_time_ms / long_interval_ms;
@@ -691,59 +691,59 @@ void G1Analytics::compute_pause_time_ratios(double end_time_sec, double pause_ti
   _short_term_pause_time_ratio = clamp(_short_term_pause_time_ratio, 0.0, 1.0);
 }
 
-void G1Analytics::report_concurrent_refine_rate_ms(double cards_per_ms) {
+void ShenandoahAnalytics::report_concurrent_refine_rate_ms(double cards_per_ms) {
   _concurrent_refine_rate_ms_seq.add(cards_per_ms);
 }
 
-void G1Analytics::report_dirtied_cards_rate_ms(double cards_per_ms) {
+void ShenandoahAnalytics::report_dirtied_cards_rate_ms(double cards_per_ms) {
   _dirtied_cards_rate_ms_seq.add(cards_per_ms);
 }
 
-void G1Analytics::report_dirtied_cards_in_thread_buffers(size_t cards) {
+void ShenandoahAnalytics::report_dirtied_cards_in_thread_buffers(size_t cards) {
   _dirtied_cards_in_thread_buffers_seq.add(double(cards));
 }
 
-void G1Analytics::report_cost_per_card_scan_ms(double cost_per_card_ms, bool for_young_only_phase) {
+void ShenandoahAnalytics::report_cost_per_card_scan_ms(double cost_per_card_ms, bool for_young_only_phase) {
   _cost_per_card_scan_ms_seq.add(cost_per_card_ms, for_young_only_phase);
 }
 
-void G1Analytics::report_cost_per_card_merge_ms(double cost_per_card_ms, bool for_young_only_phase) {
+void ShenandoahAnalytics::report_cost_per_card_merge_ms(double cost_per_card_ms, bool for_young_only_phase) {
   _cost_per_card_merge_ms_seq.add(cost_per_card_ms, for_young_only_phase);
 }
 
-void G1Analytics::report_card_scan_to_merge_ratio(double merge_to_scan_ratio, bool for_young_only_phase) {
+void ShenandoahAnalytics::report_card_scan_to_merge_ratio(double merge_to_scan_ratio, bool for_young_only_phase) {
   _card_scan_to_merge_ratio_seq.add(merge_to_scan_ratio, for_young_only_phase);
 }
 
-void G1Analytics::report_cost_per_byte_ms(double cost_per_byte_ms, bool for_young_only_phase) {
+void ShenandoahAnalytics::report_cost_per_byte_ms(double cost_per_byte_ms, bool for_young_only_phase) {
   _cost_per_byte_copied_ms_seq.add(cost_per_byte_ms, for_young_only_phase);
 }
 
-void G1Analytics::report_cost_per_byte_cpu(double cost_per_byte_cpu, bool for_young_only_phase) {
+void ShenandoahAnalytics::report_cost_per_byte_cpu(double cost_per_byte_cpu, bool for_young_only_phase) {
   _cost_per_byte_copied_user_seq.add(cost_per_byte_cpu, for_young_only_phase);
 }
 
-void G1Analytics::report_young_other_cost_per_region_ms(double other_cost_per_region_ms) {
+void ShenandoahAnalytics::report_young_other_cost_per_region_ms(double other_cost_per_region_ms) {
   _young_other_cost_per_region_ms_seq.add(other_cost_per_region_ms);
 }
 
-void G1Analytics::report_non_young_other_cost_per_region_ms(double other_cost_per_region_ms) {
+void ShenandoahAnalytics::report_non_young_other_cost_per_region_ms(double other_cost_per_region_ms) {
   _non_young_other_cost_per_region_ms_seq.add(other_cost_per_region_ms);
 }
 
-void G1Analytics::report_constant_other_time_ms(double constant_other_time_ms) {
+void ShenandoahAnalytics::report_constant_other_time_ms(double constant_other_time_ms) {
   _constant_other_time_ms_seq.add(constant_other_time_ms);
 }
 
-void G1Analytics::report_pending_cards(double pending_cards, bool for_young_only_phase) {
+void ShenandoahAnalytics::report_pending_cards(double pending_cards, bool for_young_only_phase) {
   _pending_cards_seq.add(pending_cards, for_young_only_phase);
 }
 
-void G1Analytics::report_rs_length(double rs_length, bool for_young_only_phase) {
+void ShenandoahAnalytics::report_rs_length(double rs_length, bool for_young_only_phase) {
   _rs_length_seq.add(rs_length, for_young_only_phase);
 }
 
-double G1Analytics::predict_alloc_rate_ms() const {
+double ShenandoahAnalytics::predict_alloc_rate_ms() const {
   if (enough_samples_available(&_alloc_rate_ms_seq)) {
     return predict_zero_bounded(&_alloc_rate_ms_seq);
   } else {
@@ -751,76 +751,76 @@ double G1Analytics::predict_alloc_rate_ms() const {
   }
 }
 
-double G1Analytics::predict_concurrent_refine_rate_ms() const {
+double ShenandoahAnalytics::predict_concurrent_refine_rate_ms() const {
   return predict_zero_bounded(&_concurrent_refine_rate_ms_seq);
 }
 
-double G1Analytics::predict_dirtied_cards_rate_ms() const {
+double ShenandoahAnalytics::predict_dirtied_cards_rate_ms() const {
   return predict_zero_bounded(&_dirtied_cards_rate_ms_seq);
 }
 
-size_t G1Analytics::predict_dirtied_cards_in_thread_buffers() const {
+size_t ShenandoahAnalytics::predict_dirtied_cards_in_thread_buffers() const {
   return predict_size(&_dirtied_cards_in_thread_buffers_seq);
 }
 
-size_t G1Analytics::predict_scan_card_num(size_t rs_length, bool for_young_only_phase) const {
+size_t ShenandoahAnalytics::predict_scan_card_num(size_t rs_length, bool for_young_only_phase) const {
   return rs_length * predict_in_unit_interval(&_card_scan_to_merge_ratio_seq, for_young_only_phase);
 }
 
-double G1Analytics::predict_card_merge_time_ms(size_t card_num, bool for_young_only_phase) const {
+double ShenandoahAnalytics::predict_card_merge_time_ms(size_t card_num, bool for_young_only_phase) const {
   return card_num * predict_zero_bounded(&_cost_per_card_merge_ms_seq, for_young_only_phase);
 }
 
-double G1Analytics::predict_card_scan_time_ms(size_t card_num, bool for_young_only_phase) const {
+double ShenandoahAnalytics::predict_card_scan_time_ms(size_t card_num, bool for_young_only_phase) const {
   return card_num * predict_zero_bounded(&_cost_per_card_scan_ms_seq, for_young_only_phase);
 }
 
-double G1Analytics::predict_object_copy_time_ms(size_t bytes_to_copy, bool for_young_only_phase) const {
+double ShenandoahAnalytics::predict_object_copy_time_ms(size_t bytes_to_copy, bool for_young_only_phase) const {
   return bytes_to_copy * predict_zero_bounded(&_cost_per_byte_copied_ms_seq, for_young_only_phase);
 }
 
-double G1Analytics::predict_constant_other_time_ms() const {
+double ShenandoahAnalytics::predict_constant_other_time_ms() const {
   return predict_zero_bounded(&_constant_other_time_ms_seq);
 }
 
-double G1Analytics::predict_young_other_time_ms(size_t young_num) const {
+double ShenandoahAnalytics::predict_young_other_time_ms(size_t young_num) const {
   return young_num * predict_zero_bounded(&_young_other_cost_per_region_ms_seq);
 }
 
-double G1Analytics::predict_non_young_other_time_ms(size_t non_young_num) const {
+double ShenandoahAnalytics::predict_non_young_other_time_ms(size_t non_young_num) const {
   return non_young_num * predict_zero_bounded(&_non_young_other_cost_per_region_ms_seq);
 }
 
-double G1Analytics::predict_remark_time_ms() const {
+double ShenandoahAnalytics::predict_remark_time_ms() const {
   return predict_zero_bounded(&_concurrent_mark_remark_times_ms);
 }
 
-double G1Analytics::predict_cleanup_time_ms() const {
+double ShenandoahAnalytics::predict_cleanup_time_ms() const {
   return predict_zero_bounded(&_concurrent_mark_cleanup_times_ms);
 }
 
-size_t G1Analytics::predict_rs_length(bool for_young_only_phase) const {
+size_t ShenandoahAnalytics::predict_rs_length(bool for_young_only_phase) const {
   return predict_size(&_rs_length_seq, for_young_only_phase);
 }
 
-size_t G1Analytics::predict_pending_cards(bool for_young_only_phase) const {
+size_t ShenandoahAnalytics::predict_pending_cards(bool for_young_only_phase) const {
   return predict_size(&_pending_cards_seq, for_young_only_phase);
 }
 
-double G1Analytics::oldest_known_gc_end_time_sec() const {
+double ShenandoahAnalytics::oldest_known_gc_end_time_sec() const {
   return _recent_prev_end_times_for_all_gcs_sec.oldest();
 }
 
-double G1Analytics::most_recent_gc_end_time_sec() const {
+double ShenandoahAnalytics::most_recent_gc_end_time_sec() const {
   return _recent_prev_end_times_for_all_gcs_sec.last();
 }
 
-void G1Analytics::update_recent_gc_times(double end_time_sec,
+void ShenandoahAnalytics::update_recent_gc_times(double end_time_sec,
                                          double pause_time_ms) {
   _recent_gc_times_ms.add(pause_time_ms);
   _recent_prev_end_times_for_all_gcs_sec.add(end_time_sec);
 }
 
-void G1Analytics::report_concurrent_mark_cleanup_times_ms(double ms) {
+void ShenandoahAnalytics::report_concurrent_mark_cleanup_times_ms(double ms) {
   _concurrent_mark_cleanup_times_ms.add(ms);
 }
