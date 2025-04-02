@@ -75,6 +75,157 @@ class ShenandoahAllocationRateUser : public CHeapObj<mtGC> {
    TruncatedSeq _rate_avg;
  };
 
+class TruncatedSeq;
+class ShenandoahPredictions;
+
+class ShenandoahAnalytics: public CHeapObj<mtGC> {
+  const static int TruncatedSeqLength = 10;
+  const static int NumPrevPausesForHeuristics = 10;
+  const ShenandoahPredictions* _predictor;
+
+  // These exclude marking times.
+  TruncatedSeq _recent_gc_times_ms;
+
+  TruncatedSeq _concurrent_mark_remark_times_ms;
+  TruncatedSeq _concurrent_mark_cleanup_times_ms;
+
+  TruncatedSeq _alloc_rate_ms_seq;
+  double        _prev_collection_pause_end_ms;
+
+  TruncatedSeq _concurrent_refine_rate_ms_seq;
+  TruncatedSeq _dirtied_cards_rate_ms_seq;
+  TruncatedSeq _dirtied_cards_in_thread_buffers_seq;
+  // The ratio between the number of scanned cards and actually merged cards, for
+  // young-only and mixed gcs.
+  ShenandoahPhaseDependentSeq _card_scan_to_merge_ratio_seq;
+
+  // The cost to scan a card during young-only and mixed gcs in ms.
+  ShenandoahPhaseDependentSeq _cost_per_card_scan_ms_seq;
+  // The cost to merge a card during young-only and mixed gcs in ms.
+  ShenandoahPhaseDependentSeq _cost_per_card_merge_ms_seq;
+  // The cost to copy a byte in ms.
+  ShenandoahPhaseDependentSeq _cost_per_byte_copied_ms_seq;
+
+  // The cost to scan a card during young-only and mixed gcs in ms.
+  ShenandoahPhaseDependentSeq _cost_per_card_scan_user_seq;
+  // The cost to merge a card during young-only and mixed gcs in ms.
+  ShenandoahPhaseDependentSeq _cost_per_card_merge_cpu_seq;
+  // The cost to copy a byte in ms.
+  ShenandoahPhaseDependentSeq _cost_per_byte_copied_user_seq;
+
+  ShenandoahPhaseDependentSeq _pending_cards_seq;
+  ShenandoahPhaseDependentSeq _rs_length_seq;
+
+  TruncatedSeq _constant_other_time_ms_seq;
+  TruncatedSeq _young_other_cost_per_region_ms_seq;
+  TruncatedSeq _non_young_other_cost_per_region_ms_seq;
+
+  TruncatedSeq _cost_per_byte_ms_during_cm_seq;
+
+  // Statistics kept per GC stoppage, pause or full.
+  TruncatedSeq _recent_prev_end_times_for_all_gcs_sec;
+
+  // Cached values for long and short term pause time ratios. See
+  // compute_pause_time_ratios() for how they are computed.
+  double _long_term_pause_time_ratio;
+  double _short_term_pause_time_ratio;
+
+  double predict_in_unit_interval(TruncatedSeq const* seq) const;
+  size_t predict_size(TruncatedSeq const* seq) const;
+  double predict_zero_bounded(TruncatedSeq const* seq) const;
+
+  double predict_in_unit_interval(ShenandoahPhaseDependentSeq const* seq, bool for_young_only_phase) const;
+  size_t predict_size(ShenandoahPhaseDependentSeq const* seq, bool for_young_only_phase) const;
+  double predict_zero_bounded(ShenandoahPhaseDependentSeq const* seq, bool for_young_only_phase) const;
+
+  double oldest_known_gc_end_time_sec() const;
+  double most_recent_gc_end_time_sec() const;
+
+public:
+  ShenandoahAnalytics(const ShenandoahPredictions* predictor);
+
+  // Returns whether the sequence have enough samples to get a "good" prediction.
+  // The constant used is random but "small".
+  static bool enough_samples_available(TruncatedSeq const* seq);
+
+  double prev_collection_pause_end_ms() const {
+    return _prev_collection_pause_end_ms;
+  }
+
+  double long_term_pause_time_ratio() const {
+    return _long_term_pause_time_ratio;
+  }
+
+  double short_term_pause_time_ratio() const {
+    return _short_term_pause_time_ratio;
+  }
+
+  uint number_of_recorded_pause_times() const {
+    return NumPrevPausesForHeuristics;
+  }
+
+  void append_prev_collection_pause_end_ms(double ms) {
+    _prev_collection_pause_end_ms += ms;
+  }
+
+  void set_prev_collection_pause_end_ms(double ms) {
+    _prev_collection_pause_end_ms = ms;
+  }
+
+  void report_concurrent_mark_remark_times_ms(double ms);
+  void report_concurrent_mark_cleanup_times_ms(double ms);
+  void report_alloc_rate_ms(double alloc_rate);
+  void report_concurrent_refine_rate_ms(double cards_per_ms);
+  void report_dirtied_cards_rate_ms(double cards_per_ms);
+  void report_dirtied_cards_in_thread_buffers(size_t num_cards);
+  void report_cost_per_card_scan_ms(double cost_per_remset_card_ms, bool for_young_only_phase);
+  void report_cost_per_card_merge_ms(double cost_per_card_ms, bool for_young_only_phase);
+  void report_cost_per_card_scan_user(double cost_per_remset_card_cpu, bool for_young_only_phase);
+  void report_cost_per_card_merge_cpu(double cost_per_card_cpu, bool for_young_only_phase);
+  void report_card_scan_to_merge_ratio(double cards_per_entry_ratio, bool for_young_only_phase);
+  void report_rs_length_diff(double rs_length_diff, bool for_young_only_phase);
+  void report_cost_per_byte_ms(double cost_per_byte_ms, bool for_young_only_phase);
+  void report_cost_per_byte_cpu(double cost_per_byte_cpu, bool for_young_only_phase);
+  void report_young_other_cost_per_region_ms(double other_cost_per_region_ms);
+  void report_non_young_other_cost_per_region_ms(double other_cost_per_region_ms);
+  void report_constant_other_time_ms(double constant_other_time_ms);
+  void report_pending_cards(double pending_cards, bool for_young_only_phase);
+  void report_rs_length(double rs_length, bool for_young_only_phase);
+
+  double predict_alloc_rate_ms() const;
+  int num_alloc_rate_ms() const;
+
+  double predict_concurrent_refine_rate_ms() const;
+  double predict_dirtied_cards_rate_ms() const;
+  size_t predict_dirtied_cards_in_thread_buffers() const;
+
+  // Predict how many of the given remembered set of length rs_length will add to
+  // the number of total cards scanned.
+  size_t predict_scan_card_num(size_t rs_length, bool for_young_only_phase) const;
+
+  double predict_card_merge_time_ms(size_t card_num, bool for_young_only_phase) const;
+  double predict_card_scan_time_ms(size_t card_num, bool for_young_only_phase) const;
+
+  double predict_object_copy_time_ms(size_t bytes_to_copy, bool for_young_only_phase) const;
+
+  double predict_constant_other_time_ms() const;
+
+  double predict_young_other_time_ms(size_t young_num) const;
+
+  double predict_non_young_other_time_ms(size_t non_young_num) const;
+
+  double predict_remark_time_ms() const;
+
+  double predict_cleanup_time_ms() const;
+
+  size_t predict_rs_length(bool for_young_only_phase) const;
+  size_t predict_pending_cards(bool for_young_only_phase) const;
+
+  // Add a new GC of the given duration and end time to the record.
+  void update_recent_gc_times(double end_time_sec, double elapsed_ms);
+  void compute_pause_time_ratios(double end_time_sec, double pause_time_ms);
+};
+
  class ShenandoahPredictions {
   private:
    double _sigma;
