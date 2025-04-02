@@ -45,6 +45,7 @@
 #include "gc/shenandoah/shenandoahScanRemembered.hpp"
 #include "gc/shenandoah/shenandoahSharedVariables.hpp"
 #include "gc/shenandoah/shenandoahUnload.hpp"
+#include "gc/shenandoah/heuristics/shenandoahGCPhaseTimes.hpp"
 #include "memory/metaspace.hpp"
 #include "services/memoryManager.hpp"
 #include "utilities/globalDefinitions.hpp"
@@ -559,6 +560,15 @@ public:
   ShenandoahEvacuationTracker*  _evac_tracker;
   ShenandoahMmuTracker          _mmu_tracker;
   ShenandoahGenerationSizer     _generation_sizer;
+
+  ShenandoahGCPhaseTimes* _phase_times;
+
+  ShenandoahGCPhaseTimes* phase_times() { 
+    if (_phase_times == nullptr) {
+      _phase_times = new ShenandoahGCPhaseTimes(ParallelGCThreads);
+    }
+    return _phase_times;
+  }
 
   ShenandoahRegulatorThread* regulator_thread()        { return _regulator_thread;  }
 
