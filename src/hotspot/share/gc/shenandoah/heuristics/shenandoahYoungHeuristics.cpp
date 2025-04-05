@@ -93,7 +93,7 @@ void ShenandoahYoungHeuristics::choose_young_collection_set(ShenandoahCollection
   size_t min_garbage = (free_target > actual_free) ? (free_target - actual_free) : 0;
 
   log_info(gc)("Choose young collection set, max_cset " SIZE_FORMAT "%s, free_target " SIZE_FORMAT 
-    "%s, min_garbage" SIZE_FORMAT "%s", 
+    "%s, min_garbage " SIZE_FORMAT "%s", 
     byte_size_in_proper_unit(max_cset), proper_unit_for_byte_size(max_cset),
     byte_size_in_proper_unit(free_target), proper_unit_for_byte_size(free_target),
     byte_size_in_proper_unit(min_garbage), proper_unit_for_byte_size(min_garbage));

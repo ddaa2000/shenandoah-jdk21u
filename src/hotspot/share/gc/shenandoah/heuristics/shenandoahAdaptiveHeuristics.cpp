@@ -518,6 +518,7 @@ void ShenandoahAdaptiveHeuristics::print_info() {
   //                 _space_info->name(), gc_cycle_time * 1000, byte_size_in_proper_unit(avg_alloc_rate), proper_unit_for_byte_size(avg_alloc_rate), gc_cycle_user_time * 1000, byte_size_in_proper_unit(avg_alloc_rate_user), proper_unit_for_byte_size(avg_alloc_rate_user));
   // log_info(gc) ("%s GC cost per byte:  [User]: %lf", _space_info->name())
   if (copy_bytes_during_gc != 0) {
+    log_info(gc) ("copy/expected: %lf", (double) copy_bytes_during_gc / _copy_bytes_expected);
     log_info(gc) ("copy_bytes_during_gc: %lu", copy_bytes_during_gc);
     log_info(gc) ("gc_cycle_user_time: %lfms, gc_cycle_total_time: %lfms, gc_cycle_time: %lfms", gc_cycle_user_time, gc_cycle_total_time, gc_cycle_time);
     log_info(gc) ("[User] cost_per_byte: %lfms; [User+Sys] cost_per_byte: %lfms; [Ticks] cost_per_byte: %lfms", gc_cycle_user_time / copy_bytes_during_gc, gc_cycle_total_time / copy_bytes_during_gc, gc_cycle_time / copy_bytes_during_gc);
