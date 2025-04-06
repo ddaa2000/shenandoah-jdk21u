@@ -479,6 +479,7 @@ inline oop ShenandoahHeap::try_evacuate_object(oop p, Thread* thread, Shenandoah
   if (result == copy_val) {
     // Successfully evacuated. Our copy is now the public one!
     _evac_tracker->end_evacuation(thread, size * HeapWordSize);
+    increase_copy_bytes_during_gc(size * HeapWordSize);
     if (mode()->is_generational()) {
       if (target_gen == OLD_GENERATION) {
         handle_old_evacuation(copy, size, from_region->is_young());

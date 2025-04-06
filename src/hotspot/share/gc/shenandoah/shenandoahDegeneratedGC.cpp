@@ -43,6 +43,7 @@
 #include "gc/shenandoah/shenandoahYoungGeneration.hpp"
 #include "gc/shenandoah/shenandoahWorkerPolicy.hpp"
 #include "gc/shenandoah/shenandoahVMOperations.hpp"
+#include "gc/shenandoah/shenandoahFreeSet.hpp"
 #include "runtime/vmThread.hpp"
 #include "utilities/events.hpp"
 
@@ -60,6 +61,13 @@ bool ShenandoahDegenGC::collect(GCCause::Cause cause) {
   vmop_degenerated();
   gc_majflt_stats.end_and_log("degenerated gc");
   ShenandoahHeap* heap = ShenandoahHeap::heap();
+  {
+    stringStream stream;
+    log_info(gc)("end of degenerated gc");
+    heap->free_set()->print_on_summary(&stream);
+    log_info(gc)("%s", stream.freeze());
+  }
+
   if (heap->mode()->is_generational()) {
     bool is_bootstrap_gc = heap->old_generation()->state() == ShenandoahOldGeneration::BOOTSTRAPPING;
     heap->mmu_tracker()->record_degenerated(GCId::current(), is_bootstrap_gc);

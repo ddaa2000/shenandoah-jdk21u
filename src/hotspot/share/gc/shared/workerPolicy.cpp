@@ -133,6 +133,18 @@ uint WorkerPolicy::calc_default_active_workers(uintx total_workers,
   assert(new_active_workers >= min_workers, "Minimum workers not observed");
   assert(new_active_workers <= total_workers, "Total workers not observed");
 
+  log_info(gc)("Total workers " UINTX_FORMAT " Min workers " UINTX_FORMAT " app workers " UINTX_FORMAT,
+    total_workers, min_workers, application_workers);
+  log_info(gc)("Active By Heap Original " UINTX_FORMAT " Active By JT Original" UINTX_FORMAT,
+    Universe::heap()->capacity() / HeapSizePerGCThread, 
+    (uintx) GCWorkersPerJavaThread * application_workers);
+  log_info(gc)("WorkerPolicy::calc_default_active_workers() : "
+    "active_workers(): " UINTX_FORMAT "  new_active_workers: " UINTX_FORMAT "  "
+    "prev_active_workers: " UINTX_FORMAT "\n"
+    " active_workers_by_JT: " UINTX_FORMAT "  active_workers_by_heap_size: " UINTX_FORMAT,
+    active_workers, new_active_workers, prev_active_workers,
+    active_workers_by_JT, active_workers_by_heap_size);
+
   log_trace(gc, task)("WorkerPolicy::calc_default_active_workers() : "
     "active_workers(): " UINTX_FORMAT "  new_active_workers: " UINTX_FORMAT "  "
     "prev_active_workers: " UINTX_FORMAT "\n"

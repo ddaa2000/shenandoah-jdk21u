@@ -75,6 +75,7 @@ class ShenandoahRegulatorThread: public ConcurrentGCThread {
 
   bool should_unload_classes();
 
+ public:
   ShenandoahSharedFlag _heap_changed;
   ShenandoahControlThread* _control_thread;
   ShenandoahHeuristics* _young_heuristics;

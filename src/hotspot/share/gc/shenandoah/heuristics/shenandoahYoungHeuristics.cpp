@@ -89,8 +89,14 @@ void ShenandoahYoungHeuristics::choose_young_collection_set(ShenandoahCollection
   // If this is mixed evacuation, the old-gen candidate regions have already been added.
   size_t max_cset = (size_t) (heap->get_young_evac_reserve() / ShenandoahEvacWaste);
   size_t cur_cset = 0;
-  size_t free_target = (capacity * ShenandoahMinFreeThreshold) / 100 + max_cset;
+  size_t free_target = (capacity * ShenandoahYoungMinFreeThreshold) / 100 + max_cset;
   size_t min_garbage = (free_target > actual_free) ? (free_target - actual_free) : 0;
+
+  log_info(gc)("Choose young collection set, max_cset " SIZE_FORMAT "%s, free_target " SIZE_FORMAT
+    "%s, min_garbage " SIZE_FORMAT "%s",
+    byte_size_in_proper_unit(max_cset), proper_unit_for_byte_size(max_cset),
+    byte_size_in_proper_unit(free_target), proper_unit_for_byte_size(free_target),
+    byte_size_in_proper_unit(min_garbage), proper_unit_for_byte_size(min_garbage));
 
 
   log_info(gc, ergo)(
@@ -98,7 +104,7 @@ void ShenandoahYoungHeuristics::choose_young_collection_set(ShenandoahCollection
           byte_size_in_proper_unit(max_cset), proper_unit_for_byte_size(max_cset),
           byte_size_in_proper_unit(actual_free), proper_unit_for_byte_size(actual_free));
 
-  bool logged = false;
+  size_t chosen_cset_regions = 0;
   for (size_t idx = 0; idx < size; idx++) {
     ShenandoahHeapRegion* r = data[idx]._region;
     if (cset->is_preselected(r->index())) {
@@ -114,23 +120,19 @@ void ShenandoahYoungHeuristics::choose_young_collection_set(ShenandoahCollection
         cur_cset = new_cset;
         cur_young_garbage = new_garbage;
         cset->add_region(r);
-      } else if (!logged){
-        log_info(gc)("Stop CSet Selection: exccess min garbage by: %lld", ((long long)new_garbage - (long long)min_garbage)/1024/1024);
-        if(new_garbage < min_garbage){
-          if(new_cset > max_cset){
-            log_info(gc)("Failed to exccess due to max cset");
-          }
-          if(region_garbage <= ignore_threshold){
-            log_info(gc)("Failed to exccess due to insufficient garbage");
-          }
-        }
-        logged = true;
+        chosen_cset_regions += 1;
+      } else if (new_cset > max_cset){
+        log_info(gc)("to space exhausted");
       }
     }
     // Note that we do not add aged regions if they were not pre-selected.  The reason they were not preselected
     // is because there is not sufficient room in old-gen to hold their to-be-promoted live objects or because
     // they are to be promoted in place.
   }
+  log_info(gc)("Chosen garbage " SIZE_FORMAT "%s, chosen_cset_regions %lu",
+    byte_size_in_proper_unit(cur_young_garbage), proper_unit_for_byte_size(cur_young_garbage),
+    chosen_cset_regions
+  );
 }
 
 
@@ -191,6 +193,8 @@ size_t ShenandoahYoungHeuristics::bytes_of_allocation_runway_before_gc_trigger(s
   size_t penalties      = capacity * _gc_time_penalties / 100;
 
   double rate = _allocation_rate.sample(allocated);
+  // double rate_user = _allocation_rate_user.sample(allocated);
+  // log_info(gc)("Sampled Allocation rate: %lf", rate);
 
   // At what value of available, would avg and spike triggers occur?
   //  if allocation_headroom < avg_cycle_time * avg_alloc_rate, then we experience avg trigger
@@ -225,10 +229,8 @@ size_t ShenandoahYoungHeuristics::bytes_of_allocation_runway_before_gc_trigger(s
   size_t evac_slack_avg;
   if (anticipated_available > avg_cycle_time * avg_alloc_rate + penalties + spike_headroom) {
     evac_slack_avg = anticipated_available - (avg_cycle_time * avg_alloc_rate + penalties + spike_headroom);
-    log_info(gc)("Prediction: Evac Avg Slack: %lu", evac_slack_avg);
   } else {
     // we have no slack because it's already time to trigger
-    log_info(gc)("Prediction: No Avg Slack: %lu", (size_t)((avg_cycle_time * avg_alloc_rate + penalties + spike_headroom) - anticipated_available));
     evac_slack_avg = 0;
   }
 
@@ -237,11 +239,9 @@ size_t ShenandoahYoungHeuristics::bytes_of_allocation_runway_before_gc_trigger(s
   if (is_spiking) {
     if (anticipated_available > avg_cycle_time * rate + penalties + spike_headroom) {
       evac_slack_spiking = anticipated_available - (avg_cycle_time * rate + penalties + spike_headroom);
-      log_info(gc)("Prediction: Evac Spiking Slack: %lu", evac_slack_spiking);
     } else {
       // we have no slack because it's already time to trigger
       evac_slack_spiking = 0;
-      log_info(gc)("Prediction: No Spiking Slack: %lu", (size_t)(avg_cycle_time * rate + penalties + spike_headroom) - anticipated_available);
     }
   } else {
     evac_slack_spiking = evac_slack_avg;
@@ -249,11 +249,6 @@ size_t ShenandoahYoungHeuristics::bytes_of_allocation_runway_before_gc_trigger(s
 
   size_t threshold = min_free_threshold();
   size_t evac_min_threshold = (anticipated_available > threshold)? anticipated_available - threshold: 0;
-  if( evac_min_threshold > 0 ){
-    log_info(gc)("Prediction: Min Threshold Slack: %lu", evac_min_threshold);
-  } else {
-    log_info(gc)("Prediction: Min Threshold Slack: %lu", (size_t)(threshold - anticipated_available));
-  }
   return MIN3(evac_slack_spiking, evac_slack_avg, evac_min_threshold);
 }
 

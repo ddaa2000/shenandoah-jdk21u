@@ -26,10 +26,14 @@
 #define SHARE_VM_GC_SHENANDOAH_SHENANDOAHYOUNGGENERATION_HPP
 
 #include "gc/shenandoah/shenandoahGeneration.hpp"
+#include <atomic>
 
 class ShenandoahYoungGeneration : public ShenandoahGeneration {
 private:
   ShenandoahObjToScanQueueSet* _old_gen_task_queues;
+  // std::atomic<size_t> _bytes_allocated_buffer;
+  // std::atomic<size_t> _log_id;
+  // std::atomic<size_t> _total_bytes_allocated;
 
 public:
   ShenandoahYoungGeneration(uint max_queues, size_t max_capacity, size_t max_soft_capacity);
@@ -68,6 +72,9 @@ public:
   // Do not override available_with_reserve() because that needs to see memory reserved for Collector
 
   size_t soft_available() const override;
+
+  void increase_allocated_impl(size_t bytes) override;
+  void increase_used_impl(size_t bytes) override;
 };
 
 #endif // SHARE_VM_GC_SHENANDOAH_SHENANDOAHYOUNGGENERATION_HPP

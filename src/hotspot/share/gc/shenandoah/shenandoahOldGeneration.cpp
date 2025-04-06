@@ -340,7 +340,7 @@ void ShenandoahOldGeneration::prepare_regions_and_collection_set(bool concurrent
     heap->free_set()->prepare_to_rebuild(cset_young_regions, cset_old_regions, first_old, last_old, num_old);
     // This is just old-gen completion.  No future budgeting required here.  The only reason to rebuild the freeset here
     // is in case there was any immediate old garbage identified.
-    heap->free_set()->rebuild(cset_young_regions, cset_old_regions);
+    heap->free_set()->rebuild_simple(cset_young_regions, cset_old_regions);
   }
 }
 
@@ -465,4 +465,12 @@ ShenandoahHeuristics* ShenandoahOldGeneration::initialize_heuristics(ShenandoahM
 void ShenandoahOldGeneration::record_success_concurrent(bool abbreviated) {
   heuristics()->record_success_concurrent(abbreviated);
   ShenandoahHeap::heap()->shenandoah_policy()->record_success_old();
+}
+
+void ShenandoahOldGeneration::increase_allocated_impl(size_t bytes) {
+  Atomic::add(&_bytes_allocated_since_gc_start, bytes, memory_order_relaxed);
+}
+
+void ShenandoahOldGeneration::increase_used_impl(size_t bytes) {
+  Atomic::add(&_used, bytes);
 }

@@ -30,6 +30,7 @@
 #include "gc/shenandoah/shenandoahGeneration.hpp"
 #include "gc/shenandoah/shenandoahHeap.inline.hpp"
 #include "gc/shenandoah/shenandoahHeapRegion.inline.hpp"
+#include "gc/shenandoah/shenandoahFreeSet.hpp"
 
 #include "logging/log.hpp"
 
@@ -255,10 +256,16 @@ void ShenandoahGenerationalHeuristics::log_cset_composition(ShenandoahCollection
   size_t collected_promoted = cset->get_young_bytes_to_be_promoted();
   size_t collected_young = cset->get_young_bytes_reserved_for_evacuation();
 
+  _copy_bytes_expected = collected_young + collected_promoted + collected_old;
+
   log_info(gc, ergo)(
           "Chosen CSet evacuates young: " SIZE_FORMAT "%s (of which at least: " SIZE_FORMAT "%s are to be promoted), "
           "old: " SIZE_FORMAT "%s",
           byte_size_in_proper_unit(collected_young), proper_unit_for_byte_size(collected_young),
           byte_size_in_proper_unit(collected_promoted), proper_unit_for_byte_size(collected_promoted),
           byte_size_in_proper_unit(collected_old), proper_unit_for_byte_size(collected_old));
+  
+  stringStream ss;
+  ShenandoahHeap::heap()->free_set()->print_on_summary(&ss);
+  log_info(gc)("%s", ss.freeze());
 }

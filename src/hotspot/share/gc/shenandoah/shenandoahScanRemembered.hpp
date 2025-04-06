@@ -876,15 +876,15 @@ public:
   // such methods need not be declared as inline.
   template <typename ClosureType>
   void process_clusters(size_t first_cluster, size_t count, HeapWord *end_of_range, ClosureType *oops,
-                               bool use_write_table, uint worker_id);
+                               bool use_write_table, uint worker_id, size_t* counter = nullptr);
 
   template <typename ClosureType>
   inline void process_humongous_clusters(ShenandoahHeapRegion* r, size_t first_cluster, size_t count,
-                                         HeapWord *end_of_range, ClosureType *oops, bool use_write_table);
+                                         HeapWord *end_of_range, ClosureType *oops, bool use_write_table, size_t* counter = nullptr);
 
   template <typename ClosureType>
   inline void process_region_slice(ShenandoahHeapRegion* region, size_t offset, size_t clusters, HeapWord* end_of_range,
-                                   ClosureType *cl, bool use_write_table, uint worker_id);
+                                   ClosureType *cl, bool use_write_table, uint worker_id, size_t* counter = nullptr);
 
   // To Do:
   //  Create subclasses of ShenandoahInitMarkRootsClosure and

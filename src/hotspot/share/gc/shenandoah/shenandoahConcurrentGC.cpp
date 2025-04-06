@@ -299,6 +299,11 @@ bool ShenandoahConcurrentGC::collect(GCCause::Cause cause) {
                        success? "successfully transferred": "failed to transfer", region_xfer, region_destination,
                        byte_size_in_proper_unit(old_available), proper_unit_for_byte_size(old_available),
                        byte_size_in_proper_unit(young_available), proper_unit_for_byte_size(young_available));
+    
+    stringStream stream;
+    log_info(gc)("end of concurrent gc");
+    heap->free_set()->print_on_summary(&stream);
+    log_info(gc)("%s", stream.freeze());
   }
   return true;
 }
@@ -661,6 +666,7 @@ void ShenandoahConcurrentGC::op_reset() {
     heap->pacer()->setup_for_reset();
   }
   _generation->prepare_gc();
+  heap->phase_times()->reset();
 }
 
 class ShenandoahInitMarkUpdateRegionStateClosure : public ShenandoahHeapRegionClosure {

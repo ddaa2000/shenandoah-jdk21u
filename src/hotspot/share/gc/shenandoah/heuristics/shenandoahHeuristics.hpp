@@ -31,6 +31,7 @@
 #include "gc/shenandoah/shenandoahSharedVariables.hpp"
 #include "memory/allocation.hpp"
 #include "runtime/globals_extension.hpp"
+#include <cstddef>
 
 #define SHENANDOAH_ERGO_DISABLE_FLAG(name)                                  \
   do {                                                                      \
@@ -99,8 +100,12 @@ protected:
 
   size_t _guaranteed_gc_interval;
 
-  double _cycle_start;
+  double _cycle_start;      // ticks
   double _last_cycle_end;
+  long _cycle_start_user; // gc thread(jthread)
+  long _last_cycle_end_user;
+  long _cycle_start_total; // user + sys
+  long _last_cycle_end_total;
 
   size_t _gc_times_learned;
   intx _gc_time_penalties;
@@ -163,6 +168,8 @@ public:
   virtual void initialize();
 
   double elapsed_cycle_time() const;
+  double elapsed_cycle_user_time() const;
+  double elapsed_cycle_total_time() const;
 };
 
 #endif // SHARE_GC_SHENANDOAH_HEURISTICS_SHENANDOAHHEURISTICS_HPP

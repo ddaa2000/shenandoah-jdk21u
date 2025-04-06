@@ -193,6 +193,8 @@ public:
   void prepare_to_rebuild(size_t &young_cset_regions, size_t &old_cset_regions,
                           size_t &first_old_region, size_t &last_old_region, size_t &old_region_count);
   void rebuild(size_t young_cset_regions, size_t old_cset_regions);
+  void rebuild_simple(size_t young_cset_regions, size_t old_cset_regions);
+
   void move_collector_sets_to_mutator(size_t cset_regions);
 
   void add_old_collector_free_region(ShenandoahHeapRegion* region);
@@ -208,6 +210,12 @@ public:
     return capacity() - used();
   }
 
+  inline size_t capacity_all()  const { return _free_sets.capacity_of(Mutator) + _free_sets.capacity_of(Collector) + _free_sets.capacity_of(OldCollector); }
+  inline size_t used_all()      const { return _free_sets.used_by(Mutator) + _free_sets.used_by(Collector) + _free_sets.used_by(OldCollector);     }
+  inline size_t available_all() const {
+    return capacity_all() - used_all();
+  }
+
   HeapWord* allocate(ShenandoahAllocRequest& req, bool& in_new_region);
   size_t unsafe_peek_free() const;
 
@@ -215,10 +223,14 @@ public:
   double external_fragmentation();
 
   void print_on(outputStream* out) const;
+  void print_on_summary(outputStream* out) const;
+
 
   void find_regions_with_alloc_capacity(size_t &young_cset_regions, size_t &old_cset_regions,
                                         size_t &first_old_region, size_t &last_old_region, size_t &old_region_count);
   void reserve_regions(size_t young_reserve, size_t old_reserve);
+  void reserve_regions_simple(size_t young_reserve, size_t old_reserve);
+
 };
 
 #endif // SHARE_GC_SHENANDOAH_SHENANDOAHFREESET_HPP

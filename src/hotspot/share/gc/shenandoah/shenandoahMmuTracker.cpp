@@ -189,12 +189,14 @@ ShenandoahGenerationSizer::ShenandoahGenerationSizer()
   : _sizer_kind(SizerDefaults),
     _min_desired_young_regions(0),
     _max_desired_young_regions(0) {
+  log_info(gc)("Sizer enter");
 
   if (FLAG_IS_CMDLINE(NewRatio)) {
     if (FLAG_IS_CMDLINE(NewSize) || FLAG_IS_CMDLINE(MaxNewSize)) {
       log_warning(gc, ergo)("-XX:NewSize and -XX:MaxNewSize override -XX:NewRatio");
     } else {
       _sizer_kind = SizerNewRatio;
+      log_info(gc)("Sizer ratio");
       return;
     }
   }
@@ -205,6 +207,8 @@ ShenandoahGenerationSizer::ShenandoahGenerationSizer()
                             "A new max generation size of " SIZE_FORMAT "k will be used.",
                             NewSize/K, MaxNewSize/K, NewSize/K);
     }
+    log_info(gc)("Sizer set ergo");
+
     FLAG_SET_ERGO(MaxNewSize, NewSize);
   }
 
@@ -213,12 +217,15 @@ ShenandoahGenerationSizer::ShenandoahGenerationSizer()
     if (FLAG_IS_CMDLINE(MaxNewSize)) {
       _max_desired_young_regions = MAX2(uint(MaxNewSize / ShenandoahHeapRegion::region_size_bytes()), 1U);
       _sizer_kind = SizerMaxAndNewSize;
+      log_info(gc)("SizerMaxAndNewSize, min_new %lu, max_new %lu", _min_desired_young_regions, _max_desired_young_regions);
     } else {
       _sizer_kind = SizerNewSizeOnly;
+      log_info(gc)("SizerNewSizeOnly");
     }
   } else if (FLAG_IS_CMDLINE(MaxNewSize)) {
     _max_desired_young_regions = MAX2(uint(MaxNewSize / ShenandoahHeapRegion::region_size_bytes()), 1U);
     _sizer_kind = SizerMaxNewSizeOnly;
+    log_info(gc)("SizerMaxNewSizeOnly");
   }
 }
 

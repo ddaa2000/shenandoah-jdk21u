@@ -45,10 +45,12 @@
 #include "gc/shenandoah/shenandoahScanRemembered.hpp"
 #include "gc/shenandoah/shenandoahSharedVariables.hpp"
 #include "gc/shenandoah/shenandoahUnload.hpp"
+#include "gc/shenandoah/heuristics/shenandoahGCPhaseTimes.hpp"
 #include "memory/metaspace.hpp"
 #include "services/memoryManager.hpp"
 #include "utilities/globalDefinitions.hpp"
 #include "utilities/stack.hpp"
+#include <cstddef>
 
 class ConcurrentGCTimer;
 class ObjectIterateScanRootClosure;
@@ -217,6 +219,8 @@ public:
     return true;
   }
 
+  void incr_alloc_and_log(size_t bytes);
+
 // ---------- Heap counters and metrics
 //
 private:
@@ -226,6 +230,12 @@ private:
   size_t _pad_for_promote_in_place;    // bytes of filler
   size_t _promotable_humongous_regions;
   size_t _regular_regions_promoted_in_place;
+  size_t _copy_bytes_during_gc;
+  size_t _scanned_objs_during_gc;
+  size_t _copy_user_time;
+  size_t _copy_sys_time;
+  size_t _copy_wall_time;
+
 
   volatile size_t _soft_max_size;
   shenandoah_padding(0);
@@ -242,6 +252,21 @@ public:
 
   void increase_committed(size_t bytes);
   void decrease_committed(size_t bytes);
+
+  void increase_copy_bytes_during_gc(size_t bytes);
+  size_t copy_bytes_during_gc();
+  void reset_copy_bytes_during_gc();
+
+  size_t copy_user_time();
+  size_t copy_wall_time();
+  size_t copy_sys_time();
+  void set_copy_user_time(size_t copy_user_time);
+  void set_copy_wall_time(size_t copy_wall_time);
+  void set_copy_sys_time(size_t copy_sys_time);
+
+  void increase_scanned_objs_during_gc(size_t bytes);
+  size_t scanned_objs_during_gc();
+  void reset_scanned_objs_during_gc();
 
   void reset_bytes_allocated_since_gc_start();
 
@@ -522,6 +547,7 @@ private:
   ShenandoahGeneration*      _global_generation;
   ShenandoahOldGeneration*   _old_generation;
 
+public:
   ShenandoahControlThread*   _control_thread;
   ShenandoahRegulatorThread* _regulator_thread;
   ShenandoahCollectorPolicy* _shenandoah_policy;
@@ -534,6 +560,15 @@ private:
   ShenandoahEvacuationTracker*  _evac_tracker;
   ShenandoahMmuTracker          _mmu_tracker;
   ShenandoahGenerationSizer     _generation_sizer;
+
+  ShenandoahGCPhaseTimes* _phase_times;
+
+  ShenandoahGCPhaseTimes* phase_times() { 
+    if (_phase_times == nullptr) {
+      _phase_times = new ShenandoahGCPhaseTimes(ParallelGCThreads);
+    }
+    return _phase_times;
+  }
 
   ShenandoahRegulatorThread* regulator_thread()        { return _regulator_thread;  }
 

@@ -24,6 +24,7 @@
  *
  */
 
+#include "gc/shenandoah/shenandoahHeap.hpp"
 #include "precompiled.hpp"
 #include "memory/allocation.hpp"
 #include "memory/universe.hpp"
@@ -81,6 +82,8 @@
 #include "gc/shenandoah/mode/shenandoahPassiveMode.hpp"
 #include "gc/shenandoah/mode/shenandoahSATBMode.hpp"
 #include "utilities/globalDefinitions.hpp"
+#include "utilities/ticks.hpp"
+#include <cstddef>
 
 #if INCLUDE_JFR
 #include "gc/shenandoah/shenandoahJfrSupport.hpp"
@@ -157,7 +160,12 @@ jint ShenandoahHeap::initialize() {
   //
   // Figure out heap sizing
   //
+  long user_time = 0, sys_time = 0;
+  os::get_accum_jthread_time_by_sub(&user_time, &sys_time);
 
+  os::_last_sample_user_time = user_time;
+  os::_last_sample_total_time = user_time + sys_time;
+  os::_last_sample_ticks = Ticks::now().microseconds();
   size_t init_byte_size = InitialHeapSize;
   size_t min_byte_size  = MinHeapSize;
   size_t max_byte_size  = MaxHeapSize;
@@ -187,6 +195,13 @@ jint ShenandoahHeap::initialize() {
   _soft_max_size = _num_regions * reg_size_bytes;
 
   _committed = _initial_size;
+
+  _copy_bytes_during_gc = 0;
+  _scanned_objs_during_gc = 0;
+  _copy_user_time = 0;
+  _copy_sys_time = 0;
+  _copy_wall_time = 0;
+
 
   // Now we know the number of regions and heap sizes, initialize the heuristics.
   initialize_heuristics_generations();
@@ -421,6 +436,7 @@ jint ShenandoahHeap::initialize() {
     // We are initializing free set.  We ignore cset region tallies.
     size_t first_old, last_old, num_old;
     _free_set->prepare_to_rebuild(young_cset_regions, old_cset_regions, first_old, last_old, num_old);
+    log_info(gc)("heap initialize: young cset %lu, old cset %lu, num old %lu", young_cset_regions, old_cset_regions, num_old);
     _free_set->rebuild(young_cset_regions, old_cset_regions);
   }
 
@@ -571,6 +587,10 @@ void ShenandoahHeap::initialize_heuristics_generations() {
     _old_generation->initialize_heuristics(_gc_mode);
   }
   _evac_tracker = new ShenandoahEvacuationTracker(mode()->is_generational());
+
+  ShenandoahGeneration *young = _young_generation, *old = _old_generation;
+  log_info(gc)("initial capacity young_used_regions %lu, young_max %lu, young_soft_max %lu", young->used_regions(), young->max_capacity(), young->soft_max_capacity());
+  log_info(gc)("initial capacity old_used_regions %lu, old_max %lu, old_soft_max %lu", old->used_regions(), old->max_capacity(), old->soft_max_capacity());
 }
 
 #ifdef _MSC_VER
@@ -764,6 +784,55 @@ void ShenandoahHeap::decrease_committed(size_t bytes) {
   _committed -= bytes;
 }
 
+void ShenandoahHeap::increase_copy_bytes_during_gc(size_t bytes) {
+  Atomic::add(&_copy_bytes_during_gc, bytes, memory_order_relaxed);
+}
+
+size_t ShenandoahHeap::copy_bytes_during_gc() {
+  return Atomic::load(&_copy_bytes_during_gc); 
+}
+
+size_t ShenandoahHeap::copy_user_time() {
+  return _copy_user_time;
+}
+
+size_t ShenandoahHeap::copy_sys_time() {
+  return _copy_sys_time;
+}
+
+void ShenandoahHeap::set_copy_sys_time(size_t copy_sys_time) {
+  _copy_sys_time = copy_sys_time;
+}
+
+size_t ShenandoahHeap::copy_wall_time() {
+  return _copy_wall_time;
+}
+
+void ShenandoahHeap::set_copy_wall_time(size_t copy_wall_time) {
+  _copy_wall_time = copy_wall_time;
+}
+
+
+void ShenandoahHeap::set_copy_user_time(size_t copy_user_time) {
+  _copy_user_time = copy_user_time;
+}
+
+
+void ShenandoahHeap::reset_copy_bytes_during_gc() {
+  Atomic::store(&_copy_bytes_during_gc, (size_t) 0);
+}
+
+void ShenandoahHeap::increase_scanned_objs_during_gc(size_t bytes) {
+  Atomic::add(&_scanned_objs_during_gc, bytes, memory_order_relaxed);
+}
+
+size_t ShenandoahHeap::scanned_objs_during_gc() {
+  return Atomic::load(&_scanned_objs_during_gc); 
+}
+
+void ShenandoahHeap::reset_scanned_objs_during_gc() {
+  Atomic::store(&_scanned_objs_during_gc, (size_t) 0);
+}
 // For tracking usage based on allocations, it should be the case that:
 // * The sum of regions::used == heap::used
 // * The sum of a generation's regions::used == generation::used
@@ -1274,10 +1343,47 @@ HeapWord* ShenandoahHeap::allocate_new_tlab(size_t min_size,
   HeapWord* res = allocate_memory(req, false);
   if (res != nullptr) {
     *actual_size = req.actual_size();
+    size_t bytes = requested_size * HeapWordSize;
+    // size_t prev_bab = Atomic::fetch_then_add(&os::_bytes_allocated_buffer, bytes, memory_order_relaxed);
+    incr_alloc_and_log(bytes);
+      // }
   } else {
     *actual_size = 0;
   }
   return res;
+}
+
+void ShenandoahHeap::incr_alloc_and_log(size_t bytes) {
+  size_t prev_bab = os::_bytes_allocated_buffer;
+  size_t cur_bab = prev_bab + bytes;
+  os::_bytes_allocated_buffer += bytes;
+  if (cur_bab >= LOG_THRESHOLD) {
+    // if (Atomic::cmpxchg(&os::_bytes_allocated_buffer, cur_bab, (size_t) 0, memory_order_relaxed)) {
+      os::_bytes_allocated_buffer = 0;
+
+      long user_time = 0, sys_time = 0;
+      os::get_accum_jthread_time_by_sub(&user_time, &sys_time);
+      double elapsed_user_time = (double) (user_time - os::_last_sample_user_time) / 1000.0;
+      double rate_user = (double) cur_bab / elapsed_user_time;
+      double elapsed_total_time = (double) (user_time + sys_time - os::_last_sample_total_time) / 1000.0;
+      double rate_total = (double) cur_bab / elapsed_total_time;
+      double elapsed_ticks_time = (double) (Ticks::now().microseconds() - os::_last_sample_ticks) / 1000000.0;
+      double rate_ticks = (double) cur_bab / elapsed_ticks_time;
+      log_info(gc) ("[%lu] [User] rate: %.0f %s/s, elapsed_time: %lfs; [User+Sys] rate: %.0f %s/s, elapsed_time: %lfs; [Ticks] rate: %.0f %s/s, elapsed_time: %lfs", 
+        os::_log_id, 
+        byte_size_in_proper_unit(rate_user), proper_unit_for_byte_size(rate_user), elapsed_user_time, 
+        byte_size_in_proper_unit(rate_total), proper_unit_for_byte_size(rate_total), elapsed_total_time, 
+        byte_size_in_proper_unit(rate_ticks), proper_unit_for_byte_size(rate_ticks), elapsed_ticks_time);
+      // Atomic::add(&os::_log_id, (size_t) 1);
+
+      // update data
+      long delta_user_time = 0, delta_sys_time = 0;
+      os::get_accum_jthread_time_by_sub(&delta_user_time, &delta_sys_time);
+      os::_last_sample_user_time = delta_user_time;
+      os::_last_sample_total_time = delta_user_time + delta_sys_time;
+      os::_last_sample_ticks = Ticks::now().microseconds();
+      os::_log_id++;
+    }
 }
 
 HeapWord* ShenandoahHeap::allocate_new_gclab(size_t min_size,
@@ -1572,7 +1678,14 @@ HeapWord* ShenandoahHeap::allocate_memory_under_lock(ShenandoahAllocRequest& req
 HeapWord* ShenandoahHeap::mem_allocate(size_t size,
                                         bool*  gc_overhead_limit_was_exceeded) {
   ShenandoahAllocRequest req = ShenandoahAllocRequest::for_shared(size);
-  return allocate_memory(req, false);
+  HeapWord* res = allocate_memory(req, false);
+  if (res != nullptr) {
+    size_t bytes = size * HeapWordSize;
+    // size_t prev_bab = Atomic::fetch_then_add(&os::_bytes_allocated_buffer, bytes, memory_order_relaxed);
+    incr_alloc_and_log(bytes);
+  }
+  return res;
+  // return allocate_memory(req, false);
 }
 
 MetaWord* ShenandoahHeap::satisfy_failed_metadata_allocation(ClassLoaderData* loader_data,
@@ -1682,6 +1795,10 @@ private:
   ShenandoahRegionIterator *_regions;
   bool _concurrent;
   uint _tenuring_threshold;
+public:
+  size_t volatile _user_time_total, _sys_time_total;
+
+  double _wall_start;
 
 public:
   ShenandoahGenerationalEvacuationTask(ShenandoahHeap* sh,
@@ -1691,14 +1808,28 @@ public:
     _sh(sh),
     _regions(iterator),
     _concurrent(concurrent),
-    _tenuring_threshold(0)
+    _tenuring_threshold(0),
+    _user_time_total(0),
+    _sys_time_total(0)
   {
+    _sh->set_copy_user_time(0);
+    _sh->set_copy_sys_time(0);
+    _sh->set_copy_wall_time(0);
     if (_sh->mode()->is_generational()) {
       _tenuring_threshold = _sh->age_census()->tenuring_threshold();
     }
+    _wall_start = os::elapsedTime();
+  }
+
+  ~ShenandoahGenerationalEvacuationTask(){
+    _sh->set_copy_user_time(_user_time_total);
+    _sh->set_copy_sys_time(_sys_time_total);
+    _sh->set_copy_wall_time((os::elapsedTime() - _wall_start) * 1000 * 1000);
   }
 
   void work(uint worker_id) {
+    long user_time = 0, sys_time = 0;
+    os::get_cur_thread_time(&user_time, &sys_time);
     if (_concurrent) {
       ShenandoahConcurrentWorkerSession worker_session(worker_id);
       ShenandoahSuspendibleThreadSetJoiner stsj(ShenandoahSuspendibleWorkers && !ShenandoahUseSTWGC);
@@ -1709,6 +1840,14 @@ public:
       ShenandoahEvacOOMScope oom_evac_scope;
       do_work();
     }
+    long user_time_end = 0, sys_time_end = 0;
+    os::get_cur_thread_time(&user_time_end, &sys_time_end);
+    // log_info(gc)("gc_copy_user_imm: %lu, gc_copy_sys_imm: %lu", 
+    //   (size_t)(user_time_end - user_time), (size_t)(sys_time_end - sys_time));
+    log_info(gc)("gc_copy_user_imm: %lu, gc_copy_sys_imm: %lu", 
+      (size_t)user_time_end, (size_t)sys_time_end);
+    Atomic::add(&_user_time_total, (size_t)(user_time_end - user_time));
+    Atomic::add(&_sys_time_total, (size_t)(sys_time_end - sys_time));
   }
 
 private:
@@ -3070,6 +3209,7 @@ void ShenandoahHeap::rebuild_free_set(bool concurrent) {
   size_t young_cset_regions, old_cset_regions;
   size_t first_old_region, last_old_region, old_region_count;
   _free_set->prepare_to_rebuild(young_cset_regions, old_cset_regions, first_old_region, last_old_region, old_region_count);
+  log_info(gc)("new young trash: %lu, new old trash: %lu", young_cset_regions, old_cset_regions);
   // If there are no old regions, first_old_region will be greater than last_old_region
   assert((first_old_region > last_old_region) ||
          ((last_old_region + 1 - first_old_region >= old_region_count) &&
@@ -3098,7 +3238,7 @@ void ShenandoahHeap::rebuild_free_set(bool concurrent) {
     // within partially consumed regions of memory.
   }
   // Rebuild free set based on adjusted generation sizes.
-  _free_set->rebuild(young_cset_regions, old_cset_regions);
+  _free_set->rebuild_simple(young_cset_regions, old_cset_regions);
 
   if (mode()->is_generational() && (ShenandoahGenerationalHumongousReserve > 0)) {
     size_t old_region_span = (first_old_region <= last_old_region)? (last_old_region + 1 - first_old_region): 0;

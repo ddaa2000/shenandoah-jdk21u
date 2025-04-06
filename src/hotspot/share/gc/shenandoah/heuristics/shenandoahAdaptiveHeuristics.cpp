@@ -62,6 +62,7 @@ const double ShenandoahAdaptiveHeuristics::MAXIMUM_CONFIDENCE = 3.291; // 99.9%
 
 ShenandoahAdaptiveHeuristics::ShenandoahAdaptiveHeuristics(ShenandoahSpaceInfo* space_info) :
   ShenandoahHeuristics(space_info),
+  _copy_bytes_during_gc(0),
   _margin_of_error_sd(ShenandoahAdaptiveInitialConfidence),
   _spike_threshold_sd(ShenandoahAdaptiveInitialSpikeThreshold),
   _last_trigger(OTHER),
@@ -130,6 +131,7 @@ void ShenandoahAdaptiveHeuristics::choose_collection_set_from_regiondata(Shenand
 void ShenandoahAdaptiveHeuristics::record_cycle_start() {
   ShenandoahHeuristics::record_cycle_start();
   _allocation_rate.allocation_counter_reset();
+  // _allocation_rate_user.allocation_counter_reset();
 }
 
 void ShenandoahAdaptiveHeuristics::record_success_concurrent(bool abbreviated) {
@@ -216,6 +218,8 @@ bool ShenandoahAdaptiveHeuristics::should_start_gc() {
 
   // Track allocation rate even if we decide to start a cycle for other reasons.
   double rate = _allocation_rate.sample(allocated);
+  // double rate_user = _allocation_rate_user.sample(allocated);
+  // log_info(gc)("Sampled Allocation rate: %lf", rate);
   _last_trigger = OTHER;
 
   size_t min_threshold = min_free_threshold();
@@ -405,4 +409,419 @@ double ShenandoahAllocationRate::instantaneous_rate(double time, size_t allocate
   size_t allocation_delta = (allocated > last_value) ? (allocated - last_value) : 0;
   double time_delta_sec = time - last_time;
   return (time_delta_sec > 0)  ? (allocation_delta / time_delta_sec) : 0;
+}
+
+ShenandoahAllocationRateUser::ShenandoahAllocationRateUser() :
+  _last_sample_value(0),
+  _interval_sec(1.0 / ShenandoahAdaptiveSampleFrequencyHz),
+  _rate(int(ShenandoahAdaptiveSampleSizeSeconds * ShenandoahAdaptiveSampleFrequencyHz), ShenandoahAdaptiveDecayFactor),
+  _rate_avg(int(ShenandoahAdaptiveSampleSizeSeconds * ShenandoahAdaptiveSampleFrequencyHz), ShenandoahAdaptiveDecayFactor) {
+    // double real_time, user_time, system_time;
+    // bool valid = os::getTimesSecs(&real_time, &user_time, &system_time);
+    // _last_sample_time = user_time;
+
+    // to record alloc_rate, only consider mutator thread(jthread)
+    long user_time = 0, system_time = 0;
+    os::get_accum_jthread_time_by_sub(&user_time, &system_time);
+    _last_sample_time = (double) user_time / 1000.0;
+}
+
+double ShenandoahAllocationRateUser::sample(size_t allocated) {
+  // double now = os::elapsedTime();
+  // double real_time, now, system_time;
+  // bool valid = os::getTimesSecs(&real_time, &now, &system_time);
+  long user_time = 0, system_time = 0;
+  os::get_accum_jthread_time_by_sub(&user_time, &system_time);
+  // size_t thread_exit_elapsed_time = os::thread_exit_elapsed_time();
+  // log_info(gc) ("thread_exit_elapsed_time: %lf", (double) thread_exit_elapsed_time / 1000000.0);
+  log_info(gc) ("get_accum_jthread_usertime: %lf", (double) user_time / 1000.0);
+  // double now = (double) user_time / 1000.0 + (double) thread_exit_elapsed_time / 1000000.0 ;
+  double now = (double) user_time / 1000.0;
+  double rate = 0.0;
+  log_info(gc) ("allocated: %lu, now: %lf, last_sample_time: %lf", allocated, now, _last_sample_time);
+  if (now - _last_sample_time > 0) {
+    // if (allocated >= _last_sample_value) {
+      // rate = instantaneous_rate(now, allocated);
+      rate = allocated * 1.0 / (now - _last_sample_time);
+      
+      // _rate.add(rate);
+      // _rate_avg.add(_rate.avg());
+    // }
+    _last_sample_time = now;
+    // _last_sample_value = allocated;
+  } else {
+    log_info(gc) ("now(%lf) <= last_sample_time(%lf)", now, _last_sample_time);
+  }
+  return rate;
+}
+
+double ShenandoahAllocationRateUser::upper_bound(double sds) const {
+  // Here we are using the standard deviation of the computed running
+  // average, rather than the standard deviation of the samples that went
+  // into the moving average. This is a much more stable value and is tied
+  // to the actual statistic in use (moving average over samples of averages).
+  return _rate.davg() + (sds * _rate_avg.dsd());
+}
+
+void ShenandoahAllocationRateUser::allocation_counter_reset() {
+  // double real_time, user_time, system_time;
+  // bool valid = os::getTimesSecs(&real_time, &user_time, &system_time);
+  // _last_sample_time = user_time;
+  long user_time = 0, system_time = 0;
+  os::get_accum_jthread_time_by_sub(&user_time, &system_time);
+  _last_sample_time = (double) user_time / 1000.0;
+  _last_sample_value = 0;
+}
+
+bool ShenandoahAllocationRateUser::is_spiking(double rate, double threshold) const {
+  if (rate <= 0.0) {
+    return false;
+  }
+
+  double sd = _rate.sd();
+  if (sd > 0) {
+    // There is a small chance that that rate has already been sampled, but it
+    // seems not to matter in practice.
+    double z_score = (rate - _rate.avg()) / sd;
+    if (z_score > threshold) {
+      return true;
+    }
+  }
+  return false;
+}
+
+double ShenandoahAllocationRateUser::instantaneous_rate(double time, size_t allocated) const {
+  size_t last_value = _last_sample_value;
+  double last_time = _last_sample_time;
+  size_t allocation_delta = (allocated > last_value) ? (allocated - last_value) : 0;
+  double time_delta_sec = time - last_time;
+  return (time_delta_sec > 0)  ? (allocation_delta / time_delta_sec) : 0;
+}
+
+void ShenandoahAdaptiveHeuristics::print_info() {
+  // double avg_cycle_time = _gc_cycle_time_history->davg() + (_margin_of_error_sd * _gc_cycle_time_history->dsd());
+  // log_info(gc)("%s: average GC time: %.2f ms, allocation rate: %.0f %s/s", 
+  //               _space_info->name(), avg_cycle_time * 1000, byte_size_in_proper_unit(avg_alloc_rate), proper_unit_for_byte_size(avg_alloc_rate));
+  // in milliseconds
+  ShenandoahHeap* heap = ShenandoahHeap::heap();
+  double gc_cycle_time = heap->copy_wall_time();
+  // elapsed_cycle_time() * 1000.0; // ticks
+  double gc_cycle_total_time = (heap->copy_user_time() + heap->copy_sys_time()); // njt user
+  double gc_cycle_user_time = heap->copy_user_time(); // njt user + sys
+
+  size_t copy_bytes_during_gc = _copy_bytes_during_gc;
+  // double avg_alloc_rate = _allocation_rate.upper_bound(_margin_of_error_sd);
+  // only mutator thread
+  // double avg_alloc_rate_user = _allocation_rate_user.upper_bound(_margin_of_error_sd);
+  
+  // log_info(gc)("%s: [wall] GC time: %.2f ms, allocation rate: %.0f %s/s; [user] GC time: %.2f ms, allocation rate: %.0f %s/s", 
+  //                 _space_info->name(), gc_cycle_time * 1000, byte_size_in_proper_unit(avg_alloc_rate), proper_unit_for_byte_size(avg_alloc_rate), gc_cycle_user_time * 1000, byte_size_in_proper_unit(avg_alloc_rate_user), proper_unit_for_byte_size(avg_alloc_rate_user));
+  // log_info(gc) ("%s GC cost per byte:  [User]: %lf", _space_info->name())
+  if (copy_bytes_during_gc != 0) {
+    log_info(gc) ("copy/expected: %lf", (double) copy_bytes_during_gc / _copy_bytes_expected);
+    log_info(gc) ("copy_bytes_during_gc: %lu", copy_bytes_during_gc);
+    log_info(gc) ("gc_cycle_user_time: %lfms, gc_cycle_total_time: %lfms, gc_cycle_time: %lfms", gc_cycle_user_time, gc_cycle_total_time, gc_cycle_time);
+    log_info(gc) ("[User] cost_per_byte: %lfms; [User+Sys] cost_per_byte: %lfms; [Ticks] cost_per_byte: %lfms", gc_cycle_user_time / copy_bytes_during_gc, gc_cycle_total_time / copy_bytes_during_gc, gc_cycle_time / copy_bytes_during_gc);
+  }
+}
+
+bool ShenandoahPhaseDependentSeq::enough_samples_to_use_mixed_seq() const {
+  return ShenandoahAnalytics::enough_samples_available(&_mixed_seq);
+}
+
+ShenandoahPhaseDependentSeq::ShenandoahPhaseDependentSeq(int length) :
+  _young_only_seq(length),
+  _mixed_seq(length)
+{ }
+
+TruncatedSeq* ShenandoahPhaseDependentSeq::seq_raw(bool use_young_only_phase_seq) {
+  return use_young_only_phase_seq ? &_young_only_seq : &_mixed_seq;
+}
+
+void ShenandoahPhaseDependentSeq::set_initial(double value) {
+  _young_only_seq.add(value);
+}
+
+void ShenandoahPhaseDependentSeq::add(double value, bool for_young_only_phase) {
+  seq_raw(for_young_only_phase)->add(value);
+}
+
+double ShenandoahPhaseDependentSeq::predict(const ShenandoahPredictions* predictor, bool use_young_only_phase_seq) const {
+  if (use_young_only_phase_seq || !enough_samples_to_use_mixed_seq()) {
+    return predictor->predict(&_young_only_seq);
+  } else {
+    return predictor->predict(&_mixed_seq);
+  }
+}
+
+
+
+static double cost_per_logged_card_ms_defaults[] = {
+  0.01, 0.005, 0.005, 0.003, 0.003, 0.002, 0.002, 0.0015
+};
+
+// all the same
+static double young_card_scan_to_merge_ratio_defaults[] = {
+  1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0
+};
+
+static double young_only_cost_per_card_scan_ms_defaults[] = {
+  0.015, 0.01, 0.01, 0.008, 0.008, 0.0055, 0.0055, 0.005
+};
+
+static double cost_per_byte_ms_defaults[] = {
+  0.00006, 0.00003, 0.00003, 0.000015, 0.000015, 0.00001, 0.00001, 0.000009
+};
+
+// these should be pretty consistent
+static double constant_other_time_ms_defaults[] = {
+  5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0
+};
+
+static double young_other_cost_per_region_ms_defaults[] = {
+  0.3, 0.2, 0.2, 0.15, 0.15, 0.12, 0.12, 0.1
+};
+
+static double non_young_other_cost_per_region_ms_defaults[] = {
+  1.0, 0.7, 0.7, 0.5, 0.5, 0.42, 0.42, 0.30
+};
+
+ShenandoahAnalytics::ShenandoahAnalytics(const ShenandoahPredictions* predictor) :
+    _predictor(predictor),
+    _recent_gc_times_ms(NumPrevPausesForHeuristics),
+    _concurrent_mark_remark_times_ms(NumPrevPausesForHeuristics),
+    _concurrent_mark_cleanup_times_ms(NumPrevPausesForHeuristics),
+    _alloc_rate_ms_seq(TruncatedSeqLength),
+    _prev_collection_pause_end_ms(0.0),
+    _concurrent_refine_rate_ms_seq(TruncatedSeqLength),
+    _dirtied_cards_rate_ms_seq(TruncatedSeqLength),
+    _dirtied_cards_in_thread_buffers_seq(TruncatedSeqLength),
+    _card_scan_to_merge_ratio_seq(TruncatedSeqLength),
+    _cost_per_card_scan_ms_seq(TruncatedSeqLength),
+    _cost_per_card_merge_ms_seq(TruncatedSeqLength),
+    _cost_per_byte_copied_ms_seq(TruncatedSeqLength),
+    _cost_per_card_scan_user_seq(TruncatedSeqLength),
+    _cost_per_card_merge_cpu_seq(TruncatedSeqLength),
+    _cost_per_byte_copied_user_seq(TruncatedSeqLength),
+    _pending_cards_seq(TruncatedSeqLength),
+    _rs_length_seq(TruncatedSeqLength),
+    _constant_other_time_ms_seq(TruncatedSeqLength),
+    _young_other_cost_per_region_ms_seq(TruncatedSeqLength),
+    _non_young_other_cost_per_region_ms_seq(TruncatedSeqLength),
+    _recent_prev_end_times_for_all_gcs_sec(NumPrevPausesForHeuristics),
+    _long_term_pause_time_ratio(0.0),
+    _short_term_pause_time_ratio(0.0) {
+
+  // Seed sequences with initial values.
+  _recent_prev_end_times_for_all_gcs_sec.add(os::elapsedTime());
+  _prev_collection_pause_end_ms = os::elapsedTime() * 1000.0;
+
+  int index = MIN2(ParallelGCThreads - 1, 7u);
+
+  // Start with inverse of maximum STW cost.
+  _concurrent_refine_rate_ms_seq.add(1/cost_per_logged_card_ms_defaults[0]);
+  // Some applications have very low rates for logging cards.
+  _dirtied_cards_rate_ms_seq.add(0.0);
+
+  _card_scan_to_merge_ratio_seq.set_initial(young_card_scan_to_merge_ratio_defaults[index]);
+  _cost_per_card_scan_ms_seq.set_initial(young_only_cost_per_card_scan_ms_defaults[index]);
+  _cost_per_card_scan_user_seq.set_initial(young_only_cost_per_card_scan_ms_defaults[index]);
+
+  _rs_length_seq.set_initial(0);
+  _cost_per_byte_copied_ms_seq.set_initial(cost_per_byte_ms_defaults[index]);
+  _cost_per_byte_copied_user_seq.set_initial(cost_per_byte_ms_defaults[index]);
+
+
+  _constant_other_time_ms_seq.add(constant_other_time_ms_defaults[index]);
+  _young_other_cost_per_region_ms_seq.add(young_other_cost_per_region_ms_defaults[index]);
+  _non_young_other_cost_per_region_ms_seq.add(non_young_other_cost_per_region_ms_defaults[index]);
+
+  // start conservatively (around 50ms is about right)
+  _concurrent_mark_remark_times_ms.add(0.05);
+  _concurrent_mark_cleanup_times_ms.add(0.20);
+}
+
+bool ShenandoahAnalytics::enough_samples_available(TruncatedSeq const* seq) {
+  return seq->num() >= 3;
+}
+
+double ShenandoahAnalytics::predict_in_unit_interval(TruncatedSeq const* seq) const {
+  return _predictor->predict_in_unit_interval(seq);
+}
+
+size_t ShenandoahAnalytics::predict_size(TruncatedSeq const* seq) const {
+  return (size_t)predict_zero_bounded(seq);
+}
+
+double ShenandoahAnalytics::predict_zero_bounded(TruncatedSeq const* seq) const {
+  return _predictor->predict_zero_bounded(seq);
+}
+
+double ShenandoahAnalytics::predict_in_unit_interval(ShenandoahPhaseDependentSeq const* seq, bool for_young_only_phase) const {
+  return clamp(seq->predict(_predictor, for_young_only_phase), 0.0, 1.0);
+}
+
+size_t ShenandoahAnalytics::predict_size(ShenandoahPhaseDependentSeq const* seq, bool for_young_only_phase) const {
+  return (size_t)predict_zero_bounded(seq, for_young_only_phase);
+}
+
+double ShenandoahAnalytics::predict_zero_bounded(ShenandoahPhaseDependentSeq const* seq, bool for_young_only_phase) const {
+  return MAX2(seq->predict(_predictor, for_young_only_phase), 0.0);
+}
+
+int ShenandoahAnalytics::num_alloc_rate_ms() const {
+  return _alloc_rate_ms_seq.num();
+}
+
+void ShenandoahAnalytics::report_concurrent_mark_remark_times_ms(double ms) {
+  _concurrent_mark_remark_times_ms.add(ms);
+}
+
+void ShenandoahAnalytics::report_alloc_rate_ms(double alloc_rate) {
+  _alloc_rate_ms_seq.add(alloc_rate);
+}
+
+void ShenandoahAnalytics::compute_pause_time_ratios(double end_time_sec, double pause_time_ms) {
+  double long_interval_ms = (end_time_sec - oldest_known_gc_end_time_sec()) * 1000.0;
+  double gc_pause_time_ms = _recent_gc_times_ms.sum() - _recent_gc_times_ms.oldest() + pause_time_ms;
+  _long_term_pause_time_ratio = gc_pause_time_ms / long_interval_ms;
+  _long_term_pause_time_ratio = clamp(_long_term_pause_time_ratio, 0.0, 1.0);
+
+  double short_interval_ms = (end_time_sec - most_recent_gc_end_time_sec()) * 1000.0;
+  _short_term_pause_time_ratio = pause_time_ms / short_interval_ms;
+  _short_term_pause_time_ratio = clamp(_short_term_pause_time_ratio, 0.0, 1.0);
+}
+
+void ShenandoahAnalytics::report_concurrent_refine_rate_ms(double cards_per_ms) {
+  _concurrent_refine_rate_ms_seq.add(cards_per_ms);
+}
+
+void ShenandoahAnalytics::report_dirtied_cards_rate_ms(double cards_per_ms) {
+  _dirtied_cards_rate_ms_seq.add(cards_per_ms);
+}
+
+void ShenandoahAnalytics::report_dirtied_cards_in_thread_buffers(size_t cards) {
+  _dirtied_cards_in_thread_buffers_seq.add(double(cards));
+}
+
+void ShenandoahAnalytics::report_cost_per_card_scan_ms(double cost_per_card_ms, bool for_young_only_phase) {
+  _cost_per_card_scan_ms_seq.add(cost_per_card_ms, for_young_only_phase);
+}
+
+void ShenandoahAnalytics::report_cost_per_card_merge_ms(double cost_per_card_ms, bool for_young_only_phase) {
+  _cost_per_card_merge_ms_seq.add(cost_per_card_ms, for_young_only_phase);
+}
+
+void ShenandoahAnalytics::report_card_scan_to_merge_ratio(double merge_to_scan_ratio, bool for_young_only_phase) {
+  _card_scan_to_merge_ratio_seq.add(merge_to_scan_ratio, for_young_only_phase);
+}
+
+void ShenandoahAnalytics::report_cost_per_byte_ms(double cost_per_byte_ms, bool for_young_only_phase) {
+  _cost_per_byte_copied_ms_seq.add(cost_per_byte_ms, for_young_only_phase);
+}
+
+void ShenandoahAnalytics::report_cost_per_byte_cpu(double cost_per_byte_cpu, bool for_young_only_phase) {
+  _cost_per_byte_copied_user_seq.add(cost_per_byte_cpu, for_young_only_phase);
+}
+
+void ShenandoahAnalytics::report_young_other_cost_per_region_ms(double other_cost_per_region_ms) {
+  _young_other_cost_per_region_ms_seq.add(other_cost_per_region_ms);
+}
+
+void ShenandoahAnalytics::report_non_young_other_cost_per_region_ms(double other_cost_per_region_ms) {
+  _non_young_other_cost_per_region_ms_seq.add(other_cost_per_region_ms);
+}
+
+void ShenandoahAnalytics::report_constant_other_time_ms(double constant_other_time_ms) {
+  _constant_other_time_ms_seq.add(constant_other_time_ms);
+}
+
+void ShenandoahAnalytics::report_pending_cards(double pending_cards, bool for_young_only_phase) {
+  _pending_cards_seq.add(pending_cards, for_young_only_phase);
+}
+
+void ShenandoahAnalytics::report_rs_length(double rs_length, bool for_young_only_phase) {
+  _rs_length_seq.add(rs_length, for_young_only_phase);
+}
+
+double ShenandoahAnalytics::predict_alloc_rate_ms() const {
+  if (enough_samples_available(&_alloc_rate_ms_seq)) {
+    return predict_zero_bounded(&_alloc_rate_ms_seq);
+  } else {
+    return 0.0;
+  }
+}
+
+double ShenandoahAnalytics::predict_concurrent_refine_rate_ms() const {
+  return predict_zero_bounded(&_concurrent_refine_rate_ms_seq);
+}
+
+double ShenandoahAnalytics::predict_dirtied_cards_rate_ms() const {
+  return predict_zero_bounded(&_dirtied_cards_rate_ms_seq);
+}
+
+size_t ShenandoahAnalytics::predict_dirtied_cards_in_thread_buffers() const {
+  return predict_size(&_dirtied_cards_in_thread_buffers_seq);
+}
+
+size_t ShenandoahAnalytics::predict_scan_card_num(size_t rs_length, bool for_young_only_phase) const {
+  return rs_length * predict_in_unit_interval(&_card_scan_to_merge_ratio_seq, for_young_only_phase);
+}
+
+double ShenandoahAnalytics::predict_card_merge_time_ms(size_t card_num, bool for_young_only_phase) const {
+  return card_num * predict_zero_bounded(&_cost_per_card_merge_ms_seq, for_young_only_phase);
+}
+
+double ShenandoahAnalytics::predict_card_scan_time_ms(size_t card_num, bool for_young_only_phase) const {
+  return card_num * predict_zero_bounded(&_cost_per_card_scan_ms_seq, for_young_only_phase);
+}
+
+double ShenandoahAnalytics::predict_object_copy_time_ms(size_t bytes_to_copy, bool for_young_only_phase) const {
+  return bytes_to_copy * predict_zero_bounded(&_cost_per_byte_copied_ms_seq, for_young_only_phase);
+}
+
+double ShenandoahAnalytics::predict_constant_other_time_ms() const {
+  return predict_zero_bounded(&_constant_other_time_ms_seq);
+}
+
+double ShenandoahAnalytics::predict_young_other_time_ms(size_t young_num) const {
+  return young_num * predict_zero_bounded(&_young_other_cost_per_region_ms_seq);
+}
+
+double ShenandoahAnalytics::predict_non_young_other_time_ms(size_t non_young_num) const {
+  return non_young_num * predict_zero_bounded(&_non_young_other_cost_per_region_ms_seq);
+}
+
+double ShenandoahAnalytics::predict_remark_time_ms() const {
+  return predict_zero_bounded(&_concurrent_mark_remark_times_ms);
+}
+
+double ShenandoahAnalytics::predict_cleanup_time_ms() const {
+  return predict_zero_bounded(&_concurrent_mark_cleanup_times_ms);
+}
+
+size_t ShenandoahAnalytics::predict_rs_length(bool for_young_only_phase) const {
+  return predict_size(&_rs_length_seq, for_young_only_phase);
+}
+
+size_t ShenandoahAnalytics::predict_pending_cards(bool for_young_only_phase) const {
+  return predict_size(&_pending_cards_seq, for_young_only_phase);
+}
+
+double ShenandoahAnalytics::oldest_known_gc_end_time_sec() const {
+  return _recent_prev_end_times_for_all_gcs_sec.oldest();
+}
+
+double ShenandoahAnalytics::most_recent_gc_end_time_sec() const {
+  return _recent_prev_end_times_for_all_gcs_sec.last();
+}
+
+void ShenandoahAnalytics::update_recent_gc_times(double end_time_sec,
+                                         double pause_time_ms) {
+  _recent_gc_times_ms.add(pause_time_ms);
+  _recent_prev_end_times_for_all_gcs_sec.add(end_time_sec);
+}
+
+void ShenandoahAnalytics::report_concurrent_mark_cleanup_times_ms(double ms) {
+  _concurrent_mark_cleanup_times_ms.add(ms);
 }

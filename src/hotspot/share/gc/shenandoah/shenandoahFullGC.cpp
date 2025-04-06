@@ -1547,13 +1547,13 @@ void ShenandoahFullGC::phase5_epilog() {
       assert(old_usage % ShenandoahHeapRegion::region_size_bytes() == 0, "Old usage must aligh with region size");
       assert(old_capacity % ShenandoahHeapRegion::region_size_bytes() == 0, "Old capacity must aligh with region size");
 
-      if (old_capacity > old_usage) {
-        size_t excess_old_regions = (old_capacity - old_usage) / ShenandoahHeapRegion::region_size_bytes();
-        heap->generation_sizer()->transfer_to_young(excess_old_regions);
-      } else if (old_capacity < old_usage) {
-        size_t old_regions_deficit = (old_usage - old_capacity) / ShenandoahHeapRegion::region_size_bytes();
-        heap->generation_sizer()->force_transfer_to_old(old_regions_deficit);
-      }
+      // if (old_capacity > old_usage) {
+      //   size_t excess_old_regions = (old_capacity - old_usage) / ShenandoahHeapRegion::region_size_bytes();
+      //   heap->generation_sizer()->transfer_to_young(excess_old_regions);
+      // } else if (old_capacity < old_usage) {
+      //   size_t old_regions_deficit = (old_usage - old_capacity) / ShenandoahHeapRegion::region_size_bytes();
+      //   heap->generation_sizer()->force_transfer_to_old(old_regions_deficit);
+      // }
 
       log_info(gc)("FullGC done: young usage: " SIZE_FORMAT "%s, old usage: " SIZE_FORMAT "%s",
                    byte_size_in_proper_unit(heap->young_generation()->used()), proper_unit_for_byte_size(heap->young_generation()->used()),
@@ -1579,7 +1579,7 @@ void ShenandoahFullGC::phase5_epilog() {
       // Invoke this in case we are able to transfer memory from OLD to YOUNG.
       heap->adjust_generation_sizes_for_next_cycle(0, 0, 0);
     }
-    heap->free_set()->rebuild(young_cset_regions, old_cset_regions);
+    heap->free_set()->rebuild_simple(young_cset_regions, old_cset_regions);
 
     // We defer generation resizing actions until after cset regions have been recycled.  We do this even following an
     // abbreviated cycle.
