@@ -251,7 +251,7 @@ size_t ShenandoahGenerationalHeuristics::add_preselected_regions_to_collection_s
   return cur_young_garbage;
 }
 
-void ShenandoahGenerationalHeuristics::log_cset_composition(ShenandoahCollectionSet* cset) const {
+void ShenandoahGenerationalHeuristics::log_cset_composition(ShenandoahCollectionSet* cset) {
   size_t collected_old = cset->get_old_bytes_reserved_for_evacuation();
   size_t collected_promoted = cset->get_young_bytes_to_be_promoted();
   size_t collected_young = cset->get_young_bytes_reserved_for_evacuation();

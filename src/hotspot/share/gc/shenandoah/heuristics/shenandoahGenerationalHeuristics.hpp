@@ -52,7 +52,7 @@ protected:
                                                    const RegionData* data,
                                                    size_t size) const;
 
-  void log_cset_composition(ShenandoahCollectionSet* cset) const;
+  void log_cset_composition(ShenandoahCollectionSet* cset);
 };
 
 
