@@ -327,6 +327,7 @@ inline ShenandoahAgeCensus* ShenandoahHeap::age_census() const {
 }
 
 inline oop ShenandoahHeap::evacuate_object(oop p, Thread* thread) {
+  size_t evac_start = os::rdtsc();
   assert(thread == Thread::current(), "Expected thread parameter to be current thread.");
   if (ShenandoahThreadLocalData::is_oom_during_evac(thread)) {
     // This thread went through the OOM during evac protocol and it is safe to return
@@ -345,12 +346,15 @@ inline oop ShenandoahHeap::evacuate_object(oop p, Thread* thread) {
     markWord mark = p->mark();
     if (mark.is_marked()) {
       // Already forwarded.
-      return ShenandoahBarrierSet::resolve_forwarded(p);
+      oop result = ShenandoahBarrierSet::resolve_forwarded(p);
+      increase_copy_other_time(os::rdtsc() - evac_start);
+      return result;
     }
     if (mark.has_displaced_mark_helper()) {
       // We don't want to deal with MT here just to ensure we read the right mark word.
       // Skip the potential promotion attempt for this one.
     } else if (r->age() + mark.age() >= age_census()->tenuring_threshold()) {
+      increase_copy_other_time(os::rdtsc() - evac_start);
       oop result = try_evacuate_object(p, thread, r, OLD_GENERATION);
       if (result != nullptr) {
         return result;
@@ -365,6 +369,7 @@ inline oop ShenandoahHeap::evacuate_object(oop p, Thread* thread) {
 // to OLD_GENERATION.
 inline oop ShenandoahHeap::try_evacuate_object(oop p, Thread* thread, ShenandoahHeapRegion* from_region,
                                                ShenandoahAffiliation target_gen) {
+  size_t alloc_start = os::rdtsc();
   bool alloc_from_lab = true;
   bool has_plab = false;
   HeapWord* copy = nullptr;
@@ -464,7 +469,13 @@ inline oop ShenandoahHeap::try_evacuate_object(oop p, Thread* thread, Shenandoah
 
   // Copy the object:
   _evac_tracker->begin_evacuation(thread, size * HeapWordSize);
+
+  size_t evac_start = os::rdtsc();
+  increase_copy_alloc_time(evac_start - alloc_start);
   Copy::aligned_disjoint_words(cast_from_oop<HeapWord*>(p), copy, size);
+  size_t evac_end = os::rdtsc();
+  increase_copy_mem_copy_time(evac_end - evac_start);
+
 
   oop copy_val = cast_to_oop(copy);
 
@@ -495,6 +506,9 @@ inline oop ShenandoahHeap::try_evacuate_object(oop p, Thread* thread, Shenandoah
       }
     }
     shenandoah_assert_correct(nullptr, copy_val);
+    size_t update_forwarding_end = os::rdtsc();
+    increase_copy_update_forwarding_time(update_forwarding_end - evac_end);
+
     return copy_val;
   }  else {
     // Failed to evacuate. We need to deal with the object that is left behind. Since this
@@ -535,6 +549,10 @@ inline oop ShenandoahHeap::try_evacuate_object(oop p, Thread* thread, Shenandoah
       // For non-LAB allocations, the object has already been registered
     }
     shenandoah_assert_correct(nullptr, result);
+    size_t update_forwarding_end = os::rdtsc();
+
+    increase_copy_update_forwarding_time(update_forwarding_end - evac_end);
+
     return result;
   }
 }

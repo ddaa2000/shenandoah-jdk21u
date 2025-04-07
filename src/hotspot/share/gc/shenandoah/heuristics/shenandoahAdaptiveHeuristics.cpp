@@ -510,6 +510,13 @@ void ShenandoahAdaptiveHeuristics::print_info() {
   double gc_cycle_user_time = heap->copy_user_time(); // njt user + sys
 
   size_t copy_bytes_during_gc = _copy_bytes_during_gc;
+
+  size_t copy_mem_copy_time = heap->copy_mem_copy_time();
+  size_t copy_alloc_time = heap->copy_alloc_time();
+  size_t copy_update_forwarding_time = heap->copy_update_forwarding_time();
+  size_t copy_other_time = heap->copy_other_time();
+
+
   // double avg_alloc_rate = _allocation_rate.upper_bound(_margin_of_error_sd);
   // only mutator thread
   // double avg_alloc_rate_user = _allocation_rate_user.upper_bound(_margin_of_error_sd);
@@ -517,11 +524,16 @@ void ShenandoahAdaptiveHeuristics::print_info() {
   // log_info(gc)("%s: [wall] GC time: %.2f ms, allocation rate: %.0f %s/s; [user] GC time: %.2f ms, allocation rate: %.0f %s/s", 
   //                 _space_info->name(), gc_cycle_time * 1000, byte_size_in_proper_unit(avg_alloc_rate), proper_unit_for_byte_size(avg_alloc_rate), gc_cycle_user_time * 1000, byte_size_in_proper_unit(avg_alloc_rate_user), proper_unit_for_byte_size(avg_alloc_rate_user));
   // log_info(gc) ("%s GC cost per byte:  [User]: %lf", _space_info->name())
+  size_t copy_total_time = copy_mem_copy_time + copy_alloc_time + copy_update_forwarding_time + copy_other_time;
   if (copy_bytes_during_gc != 0) {
     log_info(gc) ("copy/expected: %lf", (double) copy_bytes_during_gc / _copy_bytes_expected);
     log_info(gc) ("copy_bytes_during_gc: %lu", copy_bytes_during_gc);
     log_info(gc) ("gc_cycle_user_time: %lfms, gc_cycle_total_time: %lfms, gc_cycle_time: %lfms", gc_cycle_user_time, gc_cycle_total_time, gc_cycle_time);
     log_info(gc) ("[User] cost_per_byte: %lfms; [User+Sys] cost_per_byte: %lfms; [Ticks] cost_per_byte: %lfms", gc_cycle_user_time / copy_bytes_during_gc, gc_cycle_total_time / copy_bytes_during_gc, gc_cycle_time / copy_bytes_during_gc);
+    log_info(gc) ("copy_mem_copy_time: %lf, copy_alloc_time: %lf, copy_update_forwarding_time: %lf, copy_other_time: %lf", 
+      copy_mem_copy_time * 1.0 / copy_total_time, copy_alloc_time * 1.0 / copy_total_time, copy_update_forwarding_time * 1.0 / copy_total_time, copy_other_time * 1.0 / copy_total_time);
+    log_info(gc) ("copy_mem_copy_time_per_byte %lu, copy_alloc_time_per_byte %lu, copy_update_forwarding_time_per_byte %lu, copy_other_time_per_byte %lu", copy_mem_copy_time * 1.0 / copy_bytes_during_gc, 
+      copy_alloc_time * 1.0 / copy_bytes_during_gc, copy_update_forwarding_time * 1.0 / copy_bytes_during_gc, copy_other_time * 1.0 / copy_bytes_during_gc);
   }
 }
 

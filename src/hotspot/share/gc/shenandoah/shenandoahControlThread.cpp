@@ -697,6 +697,12 @@ void ShenandoahControlThread::service_concurrent_cycle(ShenandoahHeap* heap,
   GCMajfltStats gc_majflt_stats;
   gc_majflt_stats.start();
   heap->reset_copy_bytes_during_gc();
+  heap->reset_copy_bytes_total_during_gc();
+  heap->reset_copy_mem_copy_time();
+  heap->reset_copy_alloc_time();
+  heap->reset_copy_update_forwarding_time();
+  heap->reset_copy_other_time();
+
   heap->reset_scanned_objs_during_gc();
   // todo: reset timestamp
   if (gc.collect(cause)) {

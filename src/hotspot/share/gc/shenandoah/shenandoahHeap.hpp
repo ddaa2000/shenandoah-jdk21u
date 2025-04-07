@@ -231,10 +231,17 @@ private:
   size_t _promotable_humongous_regions;
   size_t _regular_regions_promoted_in_place;
   size_t _copy_bytes_during_gc;
+  size_t _copy_bytes_total_during_gc; // including the wasted
+
   size_t _scanned_objs_during_gc;
   size_t _copy_user_time;
   size_t _copy_sys_time;
   size_t _copy_wall_time;
+
+  size_t _copy_mem_copy_time;
+  size_t _copy_alloc_time;
+  size_t _copy_update_forwarding_time;
+  size_t _copy_other_time;
 
 
   volatile size_t _soft_max_size;
@@ -256,6 +263,26 @@ public:
   void increase_copy_bytes_during_gc(size_t bytes);
   size_t copy_bytes_during_gc();
   void reset_copy_bytes_during_gc();
+
+  void increase_copy_bytes_total_during_gc(size_t bytes);
+  size_t copy_bytes_total_during_gc();
+  void reset_copy_bytes_total_during_gc();
+
+  void increase_copy_mem_copy_time(size_t bytes);
+  size_t copy_mem_copy_time();
+  void reset_copy_mem_copy_time();
+
+  void increase_copy_alloc_time(size_t bytes);
+  size_t copy_alloc_time();
+  void reset_copy_alloc_time();
+
+  void increase_copy_update_forwarding_time(size_t bytes);
+  size_t copy_update_forwarding_time();
+  void reset_copy_update_forwarding_time();
+
+  void increase_copy_other_time(size_t bytes);
+  size_t copy_other_time();
+  void reset_copy_other_time();
 
   size_t copy_user_time();
   size_t copy_wall_time();

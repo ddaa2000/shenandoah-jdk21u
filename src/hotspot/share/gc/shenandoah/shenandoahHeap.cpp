@@ -792,6 +792,56 @@ size_t ShenandoahHeap::copy_bytes_during_gc() {
   return Atomic::load(&_copy_bytes_during_gc); 
 }
 
+void ShenandoahHeap::reset_copy_bytes_during_gc() {
+  Atomic::store(&_copy_bytes_during_gc, (size_t) 0);
+}
+
+void ShenandoahHeap::increase_copy_bytes_total_during_gc(size_t bytes) {
+  Atomic::add(&_copy_bytes_total_during_gc, bytes, memory_order_relaxed);
+}
+
+size_t ShenandoahHeap::copy_bytes_total_during_gc() {
+  return Atomic::load(&_copy_bytes_total_during_gc); 
+}
+
+void ShenandoahHeap::reset_copy_bytes_total_during_gc() {
+  Atomic::store(&_copy_bytes_total_during_gc, (size_t) 0);
+}
+
+void ShenandoahHeap::increase_copy_mem_copy_time(size_t time){
+  Atomic::add(&_copy_mem_copy_time, time);
+}
+
+size_t ShenandoahHeap::copy_mem_copy_time() {
+  return _copy_mem_copy_time;
+}
+
+void ShenandoahHeap::reset_copy_mem_copy_time() {
+  Atomic::store(&_copy_mem_copy_time, (size_t) 0);
+}
+
+void ShenandoahHeap::increase_copy_alloc_time(size_t time){
+  Atomic::add(&_copy_alloc_time, time);
+}
+size_t ShenandoahHeap::copy_alloc_time() {
+  return _copy_alloc_time;
+}
+void ShenandoahHeap::reset_copy_alloc_time() {
+  Atomic::store(&_copy_alloc_time, (size_t) 0);
+}
+
+void ShenandoahHeap::increase_copy_update_forwarding_time(size_t time){
+  Atomic::add(&_copy_update_forwarding_time, time);
+}
+
+size_t ShenandoahHeap::copy_update_forwarding_time() {
+  return _copy_update_forwarding_time;
+}
+
+void ShenandoahHeap::reset_copy_update_forwarding_time() {
+  Atomic::store(&_copy_update_forwarding_time, (size_t) 0);
+}
+
 size_t ShenandoahHeap::copy_user_time() {
   return _copy_user_time;
 }
@@ -815,11 +865,6 @@ void ShenandoahHeap::set_copy_wall_time(size_t copy_wall_time) {
 
 void ShenandoahHeap::set_copy_user_time(size_t copy_user_time) {
   _copy_user_time = copy_user_time;
-}
-
-
-void ShenandoahHeap::reset_copy_bytes_during_gc() {
-  Atomic::store(&_copy_bytes_during_gc, (size_t) 0);
 }
 
 void ShenandoahHeap::increase_scanned_objs_during_gc(size_t bytes) {
