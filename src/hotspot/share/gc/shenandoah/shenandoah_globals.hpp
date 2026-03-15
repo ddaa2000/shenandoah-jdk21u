@@ -193,11 +193,17 @@
           range(0,100)                                                      \
                                                                             \
   product(uintx, ShenandoahMinFreeThreshold, 10, EXPERIMENTAL,              \
-          "Percentage of free heap memory (or young generation, in "        \
-          "generational mode) below which most heuristics trigger "         \
-          "collection independent of other triggers. Provides a safety "    \
-          "margin for many heuristics. In percents of (soft) max heap "     \
-          "size.")                                                          \
+          "Percentage of free heap memory below which most heuristics "     \
+          "trigger collection independent of other triggers. Provides a "    \
+          "safety margin for many heuristics. In percents of (soft) max "   \
+          "heap size.")                                                     \
+          range(0,100)                                                      \
+                                                                            \
+  product(uintx, ShenandoahYoungMinFreeThreshold, 10, EXPERIMENTAL,         \
+          "Percentage of free young generation memory below which young "    \
+          "heuristics trigger collection independent of other triggers. "    \
+          "Provides a safety margin for young heuristics in generational "   \
+          "mode. In percents of (soft) max young generation size.")         \
           range(0,100)                                                      \
                                                                             \
   product(uintx, ShenandoahAllocationThreshold, 0, EXPERIMENTAL,            \

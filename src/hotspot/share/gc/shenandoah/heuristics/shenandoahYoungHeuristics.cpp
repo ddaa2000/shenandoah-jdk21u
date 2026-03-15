@@ -77,7 +77,7 @@ void ShenandoahYoungHeuristics::choose_young_collection_set(ShenandoahCollection
   // If this is mixed evacuation, the old-gen candidate regions have already been added.
   size_t max_cset = (size_t) (heap->young_generation()->get_evacuation_reserve() / ShenandoahEvacWaste);
   size_t cur_cset = 0;
-  size_t free_target = (capacity * ShenandoahMinFreeThreshold) / 100 + max_cset;
+  size_t free_target = (capacity * ShenandoahYoungMinFreeThreshold) / 100 + max_cset;
   size_t min_garbage = (free_target > actual_free) ? (free_target - actual_free) : 0;
 
 
@@ -107,6 +107,11 @@ void ShenandoahYoungHeuristics::choose_young_collection_set(ShenandoahCollection
     // is because there is not sufficient room in old-gen to hold their to-be-promoted live objects or because
     // they are to be promoted in place.
   }
+}
+
+size_t ShenandoahYoungHeuristics::min_free_threshold() {
+  // Be conservative: use max_capacity so the trigger fires earlier than soft-capacity-based threshold.
+  return _space_info->max_capacity() / 100 * ShenandoahYoungMinFreeThreshold;
 }
 
 
@@ -227,4 +232,3 @@ size_t ShenandoahYoungHeuristics::bytes_of_allocation_runway_before_gc_trigger(s
   size_t evac_min_threshold = (anticipated_available > threshold)? anticipated_available - threshold: 0;
   return MIN3(evac_slack_spiking, evac_slack_avg, evac_min_threshold);
 }
-

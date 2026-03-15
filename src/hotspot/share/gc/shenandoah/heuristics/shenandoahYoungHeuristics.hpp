@@ -47,6 +47,8 @@ public:
   size_t bytes_of_allocation_runway_before_gc_trigger(size_t young_regions_to_be_reclaimed);
 
 private:
+  size_t min_free_threshold() override;
+
   void choose_young_collection_set(ShenandoahCollectionSet* cset,
                                    const RegionData* data,
                                    size_t size, size_t actual_free,

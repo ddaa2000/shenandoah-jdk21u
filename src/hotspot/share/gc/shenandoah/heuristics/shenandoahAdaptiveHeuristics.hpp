@@ -144,7 +144,7 @@ protected:
   // For example, we might trigger a concurrent gc if we are likely to drop below
   // this threshold, or we might consider this when dynamically resizing generations
   // in the generational case. Controlled by global flag ShenandoahMinFreeThreshold.
-  size_t min_free_threshold();
+  virtual size_t min_free_threshold();
 
   inline void accept_trigger_with_type(Trigger trigger_type) {
     _last_trigger = trigger_type;
