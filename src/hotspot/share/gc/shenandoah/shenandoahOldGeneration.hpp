@@ -207,7 +207,7 @@ public:
   bool entry_coalesce_and_fill();
   void prepare_for_mixed_collections_after_global_gc();
   void prepare_gc() override;
-  void prepare_regions_and_collection_set(bool concurrent) override;
+  void prepare_regions_and_collection_set(bool concurrent, bool trace_only_no_evac = false) override;
   void record_success_concurrent(bool abbreviated) override;
   void cancel_marking() override;
 

@@ -268,8 +268,19 @@ void ShenandoahGeneration::parallel_heap_region_iterate_free(ShenandoahHeapRegio
   ShenandoahHeap::heap()->parallel_heap_region_iterate(cl);
 }
 
-void ShenandoahGeneration::compute_evacuation_budgets(ShenandoahHeap* const heap) {
+void ShenandoahGeneration::compute_evacuation_budgets(ShenandoahHeap* const heap, bool trace_only_no_evac) {
   shenandoah_assert_generational();
+
+  if (trace_only_no_evac) {
+    // Trace-only cycle: zero all budgets so choose_collection_set selects nothing.
+    ShenandoahOldGeneration* const old_generation = heap->old_generation();
+    ShenandoahYoungGeneration* const young_generation = heap->young_generation();
+    young_generation->set_evacuation_reserve(0);
+    old_generation->set_evacuation_reserve(0);
+    old_generation->set_promoted_reserve(0);
+    log_info(gc)("Trace-only cycle: evacuation budgets set to 0 (no evacuation, no promotion)");
+    return;
+  }
 
   ShenandoahOldGeneration* const old_generation = heap->old_generation();
   ShenandoahYoungGeneration* const young_generation = heap->young_generation();
@@ -672,7 +683,7 @@ size_t ShenandoahGeneration::select_aged_regions(size_t old_available) {
   return old_consumed;
 }
 
-void ShenandoahGeneration::prepare_regions_and_collection_set(bool concurrent) {
+void ShenandoahGeneration::prepare_regions_and_collection_set(bool concurrent, bool trace_only_no_evac) {
   ShenandoahHeap* heap = ShenandoahHeap::heap();
   ShenandoahCollectionSet* collection_set = heap->collection_set();
   bool is_generational = heap->mode()->is_generational();
@@ -732,7 +743,7 @@ void ShenandoahGeneration::prepare_regions_and_collection_set(bool concurrent) {
 
       // Find the amount that will be promoted, regions that will be promoted in
       // place, and preselect older regions that will be promoted by evacuation.
-      compute_evacuation_budgets(heap);
+      compute_evacuation_budgets(heap, trace_only_no_evac);
 
       // Choose the collection set, including the regions preselected above for
       // promotion into the old generation.

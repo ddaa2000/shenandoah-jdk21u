@@ -441,7 +441,7 @@ bool ShenandoahOldGeneration::contains(oop obj) const {
   return ShenandoahHeap::heap()->is_in_old(obj);
 }
 
-void ShenandoahOldGeneration::prepare_regions_and_collection_set(bool concurrent) {
+void ShenandoahOldGeneration::prepare_regions_and_collection_set(bool concurrent, bool trace_only_no_evac) {
   ShenandoahHeap* heap = ShenandoahHeap::heap();
   assert(!heap->is_full_gc_in_progress(), "Only for concurrent and degenerated GC");
 

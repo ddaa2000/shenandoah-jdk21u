@@ -44,6 +44,7 @@ public:
   typedef enum {
     none,
     concurrent_normal,
+    concurrent_trace_only,
     stw_degenerated,
     stw_full,
     bootstrapping_old,
@@ -89,6 +90,17 @@ private:
   // preparing for mark).
   ShenandoahSharedFlag _allow_old_preemption;
 
+  // Set by regulator thread when a normal young trigger fires during a trace-only cycle.
+  // Read by GC thread at final mark to decide whether to upgrade to normal evacuation.
+  ShenandoahSharedFlag _trace_upgrade_requested;
+
+  // Counter for dummy trace-only trigger interval
+  uint _trace_only_trigger_count;
+
+  // Timestamp (os::elapsedTime()) when the last GC cycle ended (mode -> none).
+  // Used by the regulator to avoid triggering trace-only cycles too soon after real GC.
+  volatile double _last_gc_end_time;
+
 public:
   ShenandoahGenerationalControlThread();
 
@@ -99,6 +111,17 @@ public:
 
   // Return true if the request to start a concurrent GC for the given generation succeeded.
   bool request_concurrent_gc(ShenandoahGeneration* generation);
+
+  // Return true if the request to start a trace-only young GC succeeded.
+  bool request_trace_only_gc(ShenandoahGeneration* generation);
+
+  // Check if trace-only upgrade was requested (called by regulator to set, by GC to read).
+  bool is_trace_upgrade_requested() const { return _trace_upgrade_requested.is_set(); }
+  void set_trace_upgrade_requested();
+  void clear_trace_upgrade_requested();
+
+  // Time when the last GC cycle ended (for trace-only min interval check).
+  double last_gc_end_time() const { return _last_gc_end_time; }
 
   // Returns the current state of the control thread
   GCMode gc_mode() const {

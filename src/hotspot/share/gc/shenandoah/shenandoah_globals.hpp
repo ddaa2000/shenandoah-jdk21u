@@ -553,6 +553,23 @@
           "Allow young generation collections to suspend concurrent"        \
           " marking in the old generation.")                                \
                                                                             \
+  product(bool, ShenandoahEnableYoungTraceOnlyTrigger, false, EXPERIMENTAL, \
+          "Enable a low-priority dummy trigger that starts trace-only "     \
+          "young GC cycles. These cycles perform marking but skip "         \
+          "evacuation unless a real young trigger preempts them.")           \
+                                                                            \
+  product(uintx, ShenandoahYoungTraceOnlyTriggerInterval, 5, EXPERIMENTAL,  \
+          "Number of regulator sleep intervals between dummy trace-only "   \
+          "trigger checks. Only used when "                                 \
+          "ShenandoahEnableYoungTraceOnlyTrigger is true.")                 \
+          range(1, 1000)                                                    \
+                                                                            \
+  product(uintx, ShenandoahYoungTraceOnlyMinGCInterval, 2000, EXPERIMENTAL,\
+          "Minimum time in milliseconds since the last GC cycle ended "    \
+          "before a trace-only young cycle may be triggered. Prevents "    \
+          "trace-only cycles from firing too soon after real GC.")          \
+          range(0, 60000)                                                   \
+                                                                            \
   product(uintx, ShenandoahAgingCyclePeriod, 1, EXPERIMENTAL,               \
           "With generational mode, increment the age of objects and"        \
           "regions each time this many young-gen GC cycles are completed.") \

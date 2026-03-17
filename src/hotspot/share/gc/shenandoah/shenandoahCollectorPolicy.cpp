@@ -41,6 +41,8 @@ ShenandoahCollectorPolicy::ShenandoahCollectorPolicy() :
   _mixed_gcs(0),
   _success_old_gcs(0),
   _interrupted_old_gcs(0),
+  _trace_only_young_gcs(0),
+  _trace_only_upgraded_gcs(0),
   _alloc_failure_degenerated(0),
   _alloc_failure_degenerated_upgrade_to_full(0),
   _alloc_failure_full(0) {
@@ -93,6 +95,14 @@ void ShenandoahCollectorPolicy::record_success_old() {
 void ShenandoahCollectorPolicy::record_interrupted_old() {
   _consecutive_young_gcs = 0;
   _interrupted_old_gcs++;
+}
+
+void ShenandoahCollectorPolicy::record_trace_only() {
+  _trace_only_young_gcs++;
+}
+
+void ShenandoahCollectorPolicy::record_trace_only_upgraded() {
+  _trace_only_upgraded_gcs++;
 }
 
 void ShenandoahCollectorPolicy::record_success_degenerated(bool is_young, bool is_abbreviated) {
@@ -232,6 +242,12 @@ void ShenandoahCollectorPolicy::print_gc_stats(outputStream* out) const {
     out->print_cr("  " SIZE_FORMAT_W(5) " mixed",                        _mixed_gcs);
     out->print_cr("  " SIZE_FORMAT_W(5) " interruptions",                _interrupted_old_gcs);
     out->cr();
+
+    if (_trace_only_young_gcs > 0 || _trace_only_upgraded_gcs > 0) {
+      out->print_cr(SIZE_FORMAT_W(5) " Trace-Only Young GCs",              _trace_only_young_gcs);
+      out->print_cr("  " SIZE_FORMAT_W(5) " upgraded to normal evacuation", _trace_only_upgraded_gcs);
+      out->cr();
+    }
   }
 
   size_t degenerated_gcs = _alloc_failure_degenerated_upgrade_to_full + _success_degenerated_gcs;

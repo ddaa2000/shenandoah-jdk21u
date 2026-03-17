@@ -77,7 +77,8 @@ protected:
 
 private:
   // Compute evacuation budgets prior to choosing collection set.
-  void compute_evacuation_budgets(ShenandoahHeap* heap);
+  // If trace_only_no_evac is true, all budgets are set to 0 (no evacuation or promotion).
+  void compute_evacuation_budgets(ShenandoahHeap* heap, bool trace_only_no_evac = false);
 
   // Adjust evacuation budgets after choosing collection set.
   void adjust_evacuation_budgets(ShenandoahHeap* heap,
@@ -172,7 +173,8 @@ private:
   virtual void prepare_gc();
 
   // Called during final mark, chooses collection set, rebuilds free set.
-  virtual void prepare_regions_and_collection_set(bool concurrent);
+  // If trace_only_no_evac is true, evacuation budgets are zeroed (trace-only cycle without upgrade).
+  virtual void prepare_regions_and_collection_set(bool concurrent, bool trace_only_no_evac = false);
 
   // Cancel marking (used by Full collect and when cancelling cycle).
   virtual void cancel_marking();

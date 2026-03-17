@@ -54,7 +54,9 @@ ShenandoahGenerationalControlThread::ShenandoahGenerationalControlThread() :
   _gc_mode(none),
   _degen_point(ShenandoahGC::_degenerated_unset),
   _heap(ShenandoahGenerationalHeap::heap()),
-  _age_period(0) {
+  _age_period(0),
+  _trace_only_trigger_count(0),
+  _last_gc_end_time(0.0) {
   shenandoah_assert_generational();
   set_name("Shenandoah Control Thread");
   create_and_start();
@@ -136,6 +138,13 @@ void ShenandoahGenerationalControlThread::check_for_request(ShenandoahGCRequest&
   }
 
   if (request.cause == GCCause::_no_gc || request.cause == GCCause::_shenandoah_stop_vm) {
+    return;
+  }
+
+  // If mode was already set to concurrent_trace_only by request_trace_only_gc,
+  // just prepare the heap for concurrent gc and keep the mode.
+  if (gc_mode() == concurrent_trace_only) {
+    _heap->set_unload_classes(false);
     return;
   }
 
@@ -251,6 +260,10 @@ void ShenandoahGenerationalControlThread::run_gc_cycle(const ShenandoahGCRequest
 
     switch (gc_mode()) {
       case concurrent_normal: {
+        service_concurrent_normal_cycle(request);
+        break;
+      }
+      case concurrent_trace_only: {
         service_concurrent_normal_cycle(request);
         break;
       }
@@ -559,13 +572,31 @@ void ShenandoahGenerationalControlThread::service_concurrent_cycle(ShenandoahGen
 
   assert(!generation->is_old(), "Old GC takes a different control path");
 
-  ShenandoahConcurrentGC gc(generation, do_old_gc_bootstrap);os::dump_accum_thread_majflt_minflt_and_cputime("beforeConcCycle");
+  bool is_trace_only = (gc_mode() == concurrent_trace_only);
+
+  if (is_trace_only) {
+    log_info(gc)("Young trace-only cycle started");
+    clear_trace_upgrade_requested();
+  }
+
+  ShenandoahConcurrentGC gc(generation, do_old_gc_bootstrap, is_trace_only);
+  os::dump_accum_thread_majflt_minflt_and_cputime("beforeConcCycle");
   if (gc.collect(cause)) {
     // Cycle is complete
     _heap->notify_gc_progress();
+    if (is_trace_only && gc.abbreviated()) {
+      log_info(gc)("Young trace-only cycle completed (abbreviated, no evacuation)");
+      _heap->shenandoah_policy()->record_trace_only();
+    } else if (is_trace_only && !gc.abbreviated()) {
+      log_info(gc)("Young trace-only cycle upgraded to normal young, evacuation performed");
+      _heap->shenandoah_policy()->record_trace_only_upgraded();
+    }
     generation->record_success_concurrent(gc.abbreviated());
   } else {
     assert(_heap->cancelled_gc(), "Must have been cancelled");
+    if (is_trace_only) {
+      log_info(gc)("Young trace-only cycle cancelled");
+    }
     check_cancellation_or_degen(gc.degen_point());
   }
 
@@ -578,6 +609,7 @@ void ShenandoahGenerationalControlThread::service_concurrent_cycle(ShenandoahGen
     } else {
       // We only record GC results if GC was successful
       msg = (do_old_gc_bootstrap) ? "At end of Concurrent Bootstrap GC" :
+            is_trace_only ? "At end of Concurrent Young Trace-Only GC" :
             "At end of Concurrent Young GC";
       if (_heap->collection_set()->has_old_regions()) {
         mmu_tracker->record_mixed(get_gc_id());
@@ -779,16 +811,55 @@ void ShenandoahGenerationalControlThread::notify_gc_waiters() {
   ml.notify_all();
 }
 
+bool ShenandoahGenerationalControlThread::request_trace_only_gc(ShenandoahGeneration* generation) {
+  if (_heap->cancelled_gc()) {
+    return false;
+  }
+
+  MonitorLocker ml(&_control_lock, Mutex::_no_safepoint_check_flag);
+  if (gc_mode() != none) {
+    // Only start trace-only when idle
+    return false;
+  }
+
+  const size_t current_gc_id = get_gc_id();
+  while (gc_mode() == none && current_gc_id == get_gc_id()) {
+    if (_requested_gc_cause != GCCause::_no_gc) {
+      log_debug(gc, thread)("Reject trace-only request: another gc is pending: %s", GCCause::to_string(_requested_gc_cause));
+      return false;
+    }
+
+    // Use the same cause as normal concurrent gc, the mode distinguishes trace-only
+    _requested_gc_cause = GCCause::_shenandoah_concurrent_gc;
+    _requested_generation = generation;
+    // Mark this request as trace-only so prepare_for_concurrent_gc can see it
+    _gc_mode = concurrent_trace_only;
+    ml.notify();
+    ml.wait();
+  }
+  return true;
+}
+
+void ShenandoahGenerationalControlThread::set_trace_upgrade_requested() {
+  _trace_upgrade_requested.set();
+  log_info(gc)("Young trace-only cycle: upgrade to evacuation requested");
+}
+
+void ShenandoahGenerationalControlThread::clear_trace_upgrade_requested() {
+  _trace_upgrade_requested.unset();
+}
+
 const char* ShenandoahGenerationalControlThread::gc_mode_name(GCMode mode) {
   switch (mode) {
-    case none:              return "idle";
-    case concurrent_normal: return "normal";
-    case stw_degenerated:   return "degenerated";
-    case stw_full:          return "full";
-    case servicing_old:     return "old";
-    case bootstrapping_old: return "bootstrap";
-    case stopped:           return "stopped";
-    default:                return "unknown";
+    case none:                  return "idle";
+    case concurrent_normal:     return "normal";
+    case concurrent_trace_only: return "trace-only";
+    case stw_degenerated:       return "degenerated";
+    case stw_full:              return "full";
+    case servicing_old:         return "old";
+    case bootstrapping_old:     return "bootstrap";
+    case stopped:               return "stopped";
+    default:                    return "unknown";
   }
 }
 
@@ -801,6 +872,9 @@ void ShenandoahGenerationalControlThread::set_gc_mode(MonitorLocker& ml, GCMode 
   if (_gc_mode != new_mode) {
     log_debug(gc, thread)("Transition from: %s to: %s", gc_mode_name(_gc_mode), gc_mode_name(new_mode));
     EventMark event("Control thread transition from: %s, to %s", gc_mode_name(_gc_mode), gc_mode_name(new_mode));
+    if (new_mode == none) {
+      _last_gc_end_time = os::elapsedTime();
+    }
     _gc_mode = new_mode;
     ml.notify_all();
   }

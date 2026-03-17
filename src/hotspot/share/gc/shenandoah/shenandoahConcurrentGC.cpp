@@ -33,6 +33,7 @@
 #include "gc/shenandoah/shenandoahClosures.inline.hpp"
 #include "gc/shenandoah/shenandoahCollectorPolicy.hpp"
 #include "gc/shenandoah/shenandoahConcurrentGC.hpp"
+#include "gc/shenandoah/shenandoahGenerationalControlThread.hpp"
 #include "gc/shenandoah/shenandoahFreeSet.hpp"
 #include "gc/shenandoah/shenandoahGeneration.hpp"
 #include "gc/shenandoah/shenandoahGenerationalHeap.hpp"
@@ -92,12 +93,13 @@ public:
   }
 };
 
-ShenandoahConcurrentGC::ShenandoahConcurrentGC(ShenandoahGeneration* generation, bool do_old_gc_bootstrap) :
+ShenandoahConcurrentGC::ShenandoahConcurrentGC(ShenandoahGeneration* generation, bool do_old_gc_bootstrap, bool trace_only) :
   _mark(generation),
   _generation(generation),
   _degen_point(ShenandoahDegenPoint::_degenerated_unset),
   _abbreviated(false),
-  _do_old_gc_bootstrap(do_old_gc_bootstrap) {
+  _do_old_gc_bootstrap(do_old_gc_bootstrap),
+  _trace_only(trace_only) {
 }
 
 ShenandoahGC::ShenandoahDegenPoint ShenandoahConcurrentGC::degen_point() const {
@@ -795,10 +797,25 @@ void ShenandoahConcurrentGC::op_final_mark() {
     // Notify JVMTI that the tagmap table will need cleaning.
     JvmtiTagMap::set_needs_cleaning();
 
+    // Determine whether this trace-only cycle should suppress evacuation.
+    // If an upgrade was requested (normal young trigger fired), we allow evacuation.
+    bool trace_only_no_evac = false;
+    if (_trace_only) {
+      ShenandoahGenerationalControlThread* ctrl =
+        checked_cast<ShenandoahGenerationalControlThread*>(heap->control_thread());
+      if (ctrl->is_trace_upgrade_requested()) {
+        log_info(gc)("Trace-only cycle upgraded to normal young cycle at final mark");
+        // Leave trace_only_no_evac = false, so evacuation proceeds normally
+      } else {
+        trace_only_no_evac = true;
+        log_info(gc)("Trace-only cycle: suppressing evacuation at final mark");
+      }
+    }
+
     // The collection set is chosen by prepare_regions_and_collection_set(). Additionally, certain parameters have been
     // established to govern the evacuation efforts that are about to begin.  Refer to comments on reserve members in
     // ShenandoahGeneration and ShenandoahOldGeneration for more detail.
-    _generation->prepare_regions_and_collection_set(true /*concurrent*/);
+    _generation->prepare_regions_and_collection_set(true /*concurrent*/, trace_only_no_evac);
 
     // Has to be done after cset selection
     heap->prepare_concurrent_roots();

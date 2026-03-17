@@ -37,7 +37,8 @@ ShenandoahRegulatorThread::ShenandoahRegulatorThread(ShenandoahGenerationalContr
   _heap(ShenandoahHeap::heap()),
   _control_thread(control_thread),
   _sleep(ShenandoahControlIntervalMin),
-  _last_sleep_adjust_time(os::elapsedTime()) {
+  _last_sleep_adjust_time(os::elapsedTime()),
+  _trace_only_interval_counter(0) {
   shenandoah_assert_generational();
   _old_heuristics = _heap->old_generation()->heuristics();
   _young_heuristics = _heap->young_generation()->heuristics();
@@ -84,7 +85,30 @@ void ShenandoahRegulatorThread::regulate_young_and_old_cycles() {
             _old_heuristics->cancel_trigger_request();
             log_debug(gc)("Heuristics request to resume old collection accepted");
           }
+        } else if (ShenandoahEnableYoungTraceOnlyTrigger) {
+          // Lowest priority: dummy trigger for trace-only young GC.
+          // Only fire if enough time has passed since the last GC cycle ended.
+          double since_last_gc_ms = (os::elapsedTime() - _control_thread->last_gc_end_time()) * 1000;
+          if (since_last_gc_ms >= ShenandoahYoungTraceOnlyMinGCInterval) {
+            _trace_only_interval_counter++;
+            if (_trace_only_interval_counter >= ShenandoahYoungTraceOnlyTriggerInterval) {
+              _trace_only_interval_counter = 0;
+              if (start_trace_only_young_cycle()) {
+                log_info(gc)("Trace-only dummy trigger: young trace-only cycle requested (%.0fms since last GC)", since_last_gc_ms);
+              }
+            }
+          } else {
+            _trace_only_interval_counter = 0;
+          }
         }
+      }
+    } else if (mode == ShenandoahGenerationalControlThread::concurrent_trace_only) {
+      // A trace-only cycle is in progress. If a real young trigger fires,
+      // request upgrade instead of starting a new cycle.
+      if (_young_heuristics->should_start_gc()) {
+        _control_thread->set_trace_upgrade_requested();
+        log_info(gc)("Regulator: young trigger during trace-only cycle, requesting upgrade");
+        _young_heuristics->cancel_trigger_request();
       }
     } else if (mode == ShenandoahGenerationalControlThread::servicing_old) {
       if (start_young_cycle()) {
@@ -147,6 +171,10 @@ bool ShenandoahRegulatorThread::start_young_cycle() const {
 
 bool ShenandoahRegulatorThread::start_global_cycle() const {
   return _global_heuristics->should_start_gc() && request_concurrent_gc(_heap->global_generation());
+}
+
+bool ShenandoahRegulatorThread::start_trace_only_young_cycle() const {
+  return _control_thread->request_trace_only_gc(_heap->young_generation());
 }
 
 bool ShenandoahRegulatorThread::request_concurrent_gc(ShenandoahGeneration* generation) const {

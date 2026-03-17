@@ -46,6 +46,8 @@ private:
   size_t _mixed_gcs;
   size_t _success_old_gcs;
   size_t _interrupted_old_gcs;
+  size_t _trace_only_young_gcs;
+  size_t _trace_only_upgraded_gcs;
   size_t _alloc_failure_degenerated;
   size_t _alloc_failure_degenerated_upgrade_to_full;
   size_t _alloc_failure_full;
@@ -62,6 +64,8 @@ public:
   void record_mixed_cycle();
   void record_success_old();
   void record_interrupted_old();
+  void record_trace_only();
+  void record_trace_only_upgraded();
 
   // A collection cycle may be "abbreviated" if Shenandoah finds a sufficient percentage
   // of regions that contain no live objects (ShenandoahImmediateThreshold). These cycles

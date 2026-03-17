@@ -55,9 +55,11 @@ private:
   ShenandoahDegenPoint        _degen_point;
   bool                        _abbreviated;
   const bool                  _do_old_gc_bootstrap;
+  const bool                  _trace_only;
 
 public:
-  ShenandoahConcurrentGC(ShenandoahGeneration* generation, bool do_old_gc_bootstrap);
+  ShenandoahConcurrentGC(ShenandoahGeneration* generation, bool do_old_gc_bootstrap, bool trace_only = false);
+  bool is_trace_only() const { return _trace_only; }
   bool collect(GCCause::Cause cause) override;
   ShenandoahDegenPoint degen_point() const;
 
