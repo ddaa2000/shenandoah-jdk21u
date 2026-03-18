@@ -204,6 +204,12 @@ bool ShenandoahConcurrentGC::collect(GCCause::Cause cause) {
     if (heap->unload_classes()) {
       entry_class_unloading();
     }
+  } else if (heap->is_evacuation_in_progress()) {
+    // Evac-only must still evacuate/update weak roots (StringTable, JVMTI, etc.)
+    // so that entries pointing to cset objects are resolved. We skip dead entry
+    // cleanup because the mark bitmap is from a prior trace-only cycle and does
+    // not cover objects allocated since then.
+    entry_weak_roots_evac_only();
   }
 
   // Final mark might have reclaimed some immediate garbage, kick cleanup to reclaim
@@ -569,6 +575,21 @@ void ShenandoahConcurrentGC::entry_weak_roots() {
 
   heap->try_inject_alloc_failure();
   op_weak_roots();
+}
+
+void ShenandoahConcurrentGC::entry_weak_roots_evac_only() {
+  ShenandoahHeap* const heap = ShenandoahHeap::heap();
+  TraceCollectorStats tcs(heap->monitoring_support()->concurrent_collection_counters());
+  const char* msg = "Concurrent weak roots (evac-only)";
+  ShenandoahConcurrentPhase gc_phase(msg, ShenandoahPhaseTimings::conc_weak_roots);
+  EventMark em("%s", msg);
+
+  ShenandoahWorkerScope scope(heap->workers(),
+                              ShenandoahWorkerPolicy::calc_workers_for_conc_root_processing(),
+                              "concurrent weak root (evac-only)");
+
+  heap->try_inject_alloc_failure();
+  op_weak_roots_evac_only();
 }
 
 void ShenandoahConcurrentGC::entry_class_unloading() {
@@ -939,6 +960,18 @@ void ShenandoahConcurrentGC::op_init_evac_only() {
     log_info(gc)("Evac-only: %zu regions eligible, %zu excluded (new allocations since trace)",
                  eligible_regions, excluded_regions);
 
+    // Merge read card table dirty cards into the write card table.
+    // The trace-only cycle's init mark called swap_remembered_set() which copied
+    // the write table into the read table and cleared the write table. Since then,
+    // only new mutator writes have dirtied the write table. But old-to-young references
+    // that existed before the trace-only cycle (and were captured in the read table)
+    // may not have been re-dirtied in the write table. During update-refs, old regions
+    // are scanned using only the write table. Without this merge, those pre-existing
+    // references would be missed, leaving dangling pointers after cset regions are recycled.
+    if (_generation->is_young()) {
+      _generation->merge_read_table_into_write();
+    }
+
     // Notify JVMTI that the tagmap table will need cleaning.
     JvmtiTagMap::set_needs_cleaning();
 
@@ -1054,18 +1087,20 @@ private:
   ShenandoahHeap* const _heap;
   ShenandoahMarkingContext* const _mark_context;
   bool  _evac_in_progress;
+  bool  _skip_dead_cleanup;
   Thread* const _thread;
 
 public:
-  ShenandoahEvacUpdateCleanupOopStorageRootsClosure();
+  ShenandoahEvacUpdateCleanupOopStorageRootsClosure(bool skip_dead_cleanup = false);
   void do_oop(oop* p);
   void do_oop(narrowOop* p);
 };
 
-ShenandoahEvacUpdateCleanupOopStorageRootsClosure::ShenandoahEvacUpdateCleanupOopStorageRootsClosure() :
+ShenandoahEvacUpdateCleanupOopStorageRootsClosure::ShenandoahEvacUpdateCleanupOopStorageRootsClosure(bool skip_dead_cleanup) :
   _heap(ShenandoahHeap::heap()),
   _mark_context(ShenandoahHeap::heap()->marking_context()),
   _evac_in_progress(ShenandoahHeap::heap()->is_evacuation_in_progress()),
+  _skip_dead_cleanup(skip_dead_cleanup),
   _thread(Thread::current()) {
 }
 
@@ -1073,11 +1108,16 @@ void ShenandoahEvacUpdateCleanupOopStorageRootsClosure::do_oop(oop* p) {
   const oop obj = RawAccess<>::oop_load(p);
   if (!CompressedOops::is_null(obj)) {
     if (!_mark_context->is_marked(obj)) {
-      shenandoah_assert_generations_reconciled();
-      if (_heap->is_in_active_generation(obj)) {
-        // Note: The obj is dead here. Do not touch it, just clear.
-        ShenandoahHeap::atomic_clear_oop(p, obj);
+      if (!_skip_dead_cleanup) {
+        shenandoah_assert_generations_reconciled();
+        if (_heap->is_in_active_generation(obj)) {
+          // Note: The obj is dead here. Do not touch it, just clear.
+          ShenandoahHeap::atomic_clear_oop(p, obj);
+        }
       }
+      // When _skip_dead_cleanup is true (evac-only), we cannot determine liveness
+      // from the bitmap because it is from a prior trace-only cycle. Objects allocated
+      // after the trace are not marked but are still live. Skip cleanup entirely.
     } else if (_evac_in_progress && _heap->in_collection_set(obj)) {
       oop resolved = ShenandoahBarrierSet::resolve_forwarded_not_null(obj);
       if (resolved == obj) {
@@ -1108,7 +1148,7 @@ public:
 };
 
 // This task not only evacuates/updates marked weak roots, but also "null"
-// dead weak roots.
+// dead weak roots (unless skip_dead_cleanup is true, as in evac-only cycles).
 class ShenandoahConcurrentWeakRootsEvacUpdateTask : public WorkerTask {
 private:
   ShenandoahVMWeakRoots<true /*concurrent*/> _vm_roots;
@@ -1118,18 +1158,22 @@ private:
                                              _cld_roots;
   ShenandoahConcurrentNMethodIterator        _nmethod_itr;
   ShenandoahPhaseTimings::Phase              _phase;
+  bool                                       _skip_dead_cleanup;
 
 public:
-  ShenandoahConcurrentWeakRootsEvacUpdateTask(ShenandoahPhaseTimings::Phase phase) :
+  ShenandoahConcurrentWeakRootsEvacUpdateTask(ShenandoahPhaseTimings::Phase phase, bool skip_dead_cleanup = false) :
     WorkerTask("Shenandoah Evacuate/Update Concurrent Weak Roots"),
     _vm_roots(phase),
     _cld_roots(phase, ShenandoahHeap::heap()->workers()->active_workers(), false /*heap iteration*/),
     _nmethod_itr(ShenandoahCodeRoots::table()),
-    _phase(phase) {}
+    _phase(phase),
+    _skip_dead_cleanup(skip_dead_cleanup) {}
 
   ~ShenandoahConcurrentWeakRootsEvacUpdateTask() {
-    // Notify runtime data structures of potentially dead oops
-    _vm_roots.report_num_dead();
+    if (!_skip_dead_cleanup) {
+      // Notify runtime data structures of potentially dead oops
+      _vm_roots.report_num_dead();
+    }
   }
 
   void work(uint worker_id) {
@@ -1139,14 +1183,14 @@ public:
       ShenandoahEvacOOMScope oom;
       // jni_roots and weak_roots are OopStorage backed roots, concurrent iteration
       // may race against OopStorage::release() calls.
-      ShenandoahEvacUpdateCleanupOopStorageRootsClosure cl;
+      ShenandoahEvacUpdateCleanupOopStorageRootsClosure cl(_skip_dead_cleanup);
       _vm_roots.oops_do(&cl, worker_id);
     }
 
     // If we are going to perform concurrent class unloading later on, we need to
     // clean up the weak oops in CLD and determine nmethod's unloading state, so that we
     // can clean up immediate garbage sooner.
-    if (ShenandoahHeap::heap()->unload_classes()) {
+    if (!_skip_dead_cleanup && ShenandoahHeap::heap()->unload_classes()) {
       // Applies ShenandoahIsCLDAlive closure to CLDs, native barrier will either null the
       // CLD's holder or evacuate it.
       {
@@ -1168,17 +1212,25 @@ public:
 };
 
 void ShenandoahConcurrentGC::op_weak_roots() {
+  op_weak_roots_impl(false /* skip_dead_cleanup */);
+}
+
+void ShenandoahConcurrentGC::op_weak_roots_evac_only() {
+  op_weak_roots_impl(true /* skip_dead_cleanup */);
+}
+
+void ShenandoahConcurrentGC::op_weak_roots_impl(bool skip_dead_cleanup) {
   ShenandoahHeap* const heap = ShenandoahHeap::heap();
   assert(heap->is_concurrent_weak_root_in_progress(), "Only during this phase");
   {
     // Concurrent weak root processing
     ShenandoahTimingsTracker t(ShenandoahPhaseTimings::conc_weak_roots_work);
     ShenandoahGCWorkerPhase worker_phase(ShenandoahPhaseTimings::conc_weak_roots_work);
-    ShenandoahConcurrentWeakRootsEvacUpdateTask task(ShenandoahPhaseTimings::conc_weak_roots_work);
+    ShenandoahConcurrentWeakRootsEvacUpdateTask task(ShenandoahPhaseTimings::conc_weak_roots_work, skip_dead_cleanup);
     heap->workers()->run_task(&task);
   }
 
-  {
+  if (!skip_dead_cleanup) {
     // It is possible for mutators executing the load reference barrier to have
     // loaded an oop through a weak handle that has since been nulled out by
     // weak root processing. Handshaking here forces them to complete the

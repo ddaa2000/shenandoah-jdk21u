@@ -99,6 +99,7 @@ protected:
   void entry_thread_roots();
   void entry_weak_refs();
   void entry_weak_roots();
+  void entry_weak_roots_evac_only();
   void entry_class_unloading();
   void entry_strong_roots();
   void entry_cleanup_early();
@@ -123,6 +124,8 @@ protected:
   void op_thread_roots();
   void op_weak_refs();
   void op_weak_roots();
+  void op_weak_roots_evac_only();
+  void op_weak_roots_impl(bool skip_dead_cleanup);
   void op_class_unloading();
   void op_strong_roots();
   void op_cleanup_early();

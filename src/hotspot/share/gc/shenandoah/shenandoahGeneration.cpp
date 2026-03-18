@@ -97,6 +97,24 @@ public:
   }
 };
 
+// Merge dirty values from the read table into the write table, leaving the
+// read table unchanged. Used by evac-only cycles so that update-refs (which
+// scans the write table) can discover all old-to-young references that were
+// known during the previous trace-only marking cycle.
+class ShenandoahMergeReadTableIntoWrite: public ShenandoahHeapRegionClosure {
+private:
+  ShenandoahScanRemembered* _scanner;
+public:
+  ShenandoahMergeReadTableIntoWrite(ShenandoahScanRemembered* scanner) : _scanner(scanner) {}
+
+  void heap_region_do(ShenandoahHeapRegion* r) override {
+    assert(r->is_old(), "Don't waste time doing this for non-old regions");
+    _scanner->merge_read_into_write(r->bottom(), ShenandoahHeapRegion::region_size_words());
+  }
+
+  bool is_thread_safe() override { return true; }
+};
+
 class ShenandoahCopyWriteCardTableToRead: public ShenandoahHeapRegionClosure {
 private:
   ShenandoahScanRemembered* _scanner;
@@ -257,6 +275,20 @@ void ShenandoahGeneration::merge_write_table() {
 
   ShenandoahOldGeneration* old_generation = heap->old_generation();
   ShenandoahMergeWriteTable task(old_generation->card_scan());
+  old_generation->parallel_heap_region_iterate(&task);
+}
+
+// Merge dirty cards from read table into write table so that update-refs
+// (which scans only the write table for old regions) will discover all
+// old-to-young references. Used by evac-only cycles which skip marking
+// and therefore never call swap_remembered_set().
+void ShenandoahGeneration::merge_read_table_into_write() {
+  ShenandoahGenerationalHeap* heap = ShenandoahGenerationalHeap::heap();
+  heap->assert_gc_workers(heap->workers()->active_workers());
+  shenandoah_assert_safepoint();
+
+  ShenandoahOldGeneration* old_generation = heap->old_generation();
+  ShenandoahMergeReadTableIntoWrite task(old_generation->card_scan());
   old_generation->parallel_heap_region_iterate(&task);
 }
 

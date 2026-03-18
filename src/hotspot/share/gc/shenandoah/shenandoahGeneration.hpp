@@ -169,6 +169,10 @@ private:
   // Update the read cards with the state of the write table (write table is not cleared).
   void merge_write_table();
 
+  // Update the write cards with the state of the read table (read table is not cleared).
+  // Used by evac-only cycles to ensure update-refs finds all old-to-young references.
+  void merge_read_table_into_write();
+
   // Called before init mark, expected to prepare regions for marking.
   virtual void prepare_gc();
 

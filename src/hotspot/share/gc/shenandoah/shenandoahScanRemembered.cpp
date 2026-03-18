@@ -626,6 +626,33 @@ void ShenandoahDirectCardMarkRememberedSet::merge_write_table(HeapWord* start, s
   }
 }
 
+// Merge any dirty values from read table into the write table, while leaving
+// the read table unchanged. This is the reverse direction of merge_write_table.
+// Used by evac-only cycles: the read table has dirty cards from the previous
+// marking cycle's swap, and the write table needs those dirty cards so that
+// update-refs (which scans the write table) can find all old-to-young references.
+void ShenandoahDirectCardMarkRememberedSet::merge_read_into_write(HeapWord* start, size_t word_count) {
+  size_t start_index = card_index_for_addr(start);
+#ifdef ASSERT
+  // avoid querying card_index_for_addr() for an address past end of heap
+  size_t end_index = card_index_for_addr(start + word_count - 1) + 1;
+#endif
+  assert(start_index % ((size_t)1 << LogCardValsPerIntPtr) == 0, "Expected a multiple of CardValsPerIntPtr");
+  assert(end_index % ((size_t)1 << LogCardValsPerIntPtr) == 0, "Expected a multiple of CardValsPerIntPtr");
+
+  // We'll access in groups of intptr_t worth of card entries
+  intptr_t* const read_table  = (intptr_t*) &(_card_table->read_byte_map())[start_index];
+  intptr_t* const write_table = (intptr_t*) &(_card_table->write_byte_map())[start_index];
+
+  // Avoid division, use shift instead
+  assert(word_count % ((size_t)1 << (LogCardSizeInWords + LogCardValsPerIntPtr)) == 0, "Expected a multiple of CardSizeInWords*CardValsPerIntPtr");
+  size_t const num = word_count >> (LogCardSizeInWords + LogCardValsPerIntPtr);
+
+  for (size_t i = 0; i < num; i++) {
+    write_table[i] &= read_table[i];
+  }
+}
+
 // Destructively copy the write table to the read table, and clean the write table.
 void ShenandoahDirectCardMarkRememberedSet::reset_remset(HeapWord* start, size_t word_count) {
   size_t start_index = card_index_for_addr(start);

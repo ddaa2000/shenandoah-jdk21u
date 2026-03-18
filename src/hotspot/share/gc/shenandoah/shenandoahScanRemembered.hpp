@@ -246,6 +246,11 @@ public:
   // the write table unchanged.
   void merge_write_table(HeapWord* start, size_t word_count);
 
+  // Merge any dirty values from read table into the write table, while leaving
+  // the read table unchanged. Used by evac-only cycles to ensure update-refs
+  // can find all old-to-young references known from the previous marking cycle.
+  void merge_read_into_write(HeapWord* start, size_t word_count);
+
   // Destructively copy the write table to the read table, and clean the write table.
   void reset_remset(HeapWord* start, size_t word_count);
 };
@@ -764,6 +769,8 @@ public:
   void reset_remset(HeapWord* start, size_t word_count) { _rs->reset_remset(start, word_count); }
 
   void merge_write_table(HeapWord* start, size_t word_count) { _rs->merge_write_table(start, word_count); }
+
+  void merge_read_into_write(HeapWord* start, size_t word_count) { _rs->merge_read_into_write(start, word_count); }
 
   size_t cluster_for_addr(HeapWord* addr);
   HeapWord* addr_for_cluster(size_t cluster_no);
