@@ -570,6 +570,12 @@
           "trace-only cycles from firing too soon after real GC.")          \
           range(0, 60000)                                                   \
                                                                             \
+  product(uintx, ShenandoahTraceOnlyEvacMaxAge, 5000, EXPERIMENTAL,        \
+          "Maximum age in milliseconds of a trace-only mark bitmap "       \
+          "that can be reused by an evac-only cycle. If the bitmap is "    \
+          "older than this, a normal young GC cycle is used instead.")      \
+          range(0, 60000)                                                   \
+                                                                            \
   product(uintx, ShenandoahAgingCyclePeriod, 1, EXPERIMENTAL,               \
           "With generational mode, increment the age of objects and"        \
           "regions each time this many young-gen GC cycles are completed.") \

@@ -93,13 +93,15 @@ public:
   }
 };
 
-ShenandoahConcurrentGC::ShenandoahConcurrentGC(ShenandoahGeneration* generation, bool do_old_gc_bootstrap, bool trace_only) :
+ShenandoahConcurrentGC::ShenandoahConcurrentGC(ShenandoahGeneration* generation, bool do_old_gc_bootstrap,
+                                               bool trace_only, bool evac_only) :
   _mark(generation),
   _generation(generation),
   _degen_point(ShenandoahDegenPoint::_degenerated_unset),
   _abbreviated(false),
   _do_old_gc_bootstrap(do_old_gc_bootstrap),
-  _trace_only(trace_only) {
+  _trace_only(trace_only),
+  _evac_only(evac_only) {
 }
 
 ShenandoahGC::ShenandoahDegenPoint ShenandoahConcurrentGC::degen_point() const {
@@ -111,85 +113,105 @@ bool ShenandoahConcurrentGC::collect(GCCause::Cause cause) {
 
   ShenandoahBreakpointGCScope breakpoint_gc_scope(cause);
 
-  // Reset for upcoming marking
-  entry_reset();
-
-  // Start initial mark under STW
-  // [gc breakdown]
   GCMajfltStats gc_majflt_stats;
-  gc_majflt_stats.start();
-  vmop_entry_init_mark();
-  gc_majflt_stats.end_and_log("init mark");
 
-  {
-    ShenandoahBreakpointMarkScope breakpoint_mark_scope(cause);
+  if (_evac_only) {
+    // Evac-only path: skip marking entirely, reuse trace-only bitmap.
+    // STW pause to build collection set and prepare evacuation.
+    gc_majflt_stats.start();
+    vmop_entry_init_evac_only();
+    gc_majflt_stats.end_and_log("init evac only");
 
-    // Reset task queue stats here, rather than in mark_concurrent_roots,
-    // because remembered set scan will `push` oops into the queues and
-    // resetting after this happens will lose those counts.
-    TASKQUEUE_STATS_ONLY(_mark.task_queues()->reset_taskqueue_stats());
-
-    // Concurrent remembered set scanning
-    entry_scan_remembered_set();
-
-    // Concurrent mark roots
-    entry_mark_roots();
-    if (check_cancellation_and_abort(ShenandoahDegenPoint::_degenerated_roots)) {
+    if (heap->cancelled_gc()) {
+      _degen_point = ShenandoahDegenPoint::_degenerated_evac;
       return false;
     }
+  } else {
+    // Normal path: reset for upcoming marking
+    entry_reset();
 
-    // Continue concurrent mark
-    entry_mark();
-    if (check_cancellation_and_abort(ShenandoahDegenPoint::_degenerated_mark)) {
+    // Start initial mark under STW
+    // [gc breakdown]
+    gc_majflt_stats.start();
+    vmop_entry_init_mark();
+    gc_majflt_stats.end_and_log("init mark");
+
+    {
+      ShenandoahBreakpointMarkScope breakpoint_mark_scope(cause);
+
+      // Reset task queue stats here, rather than in mark_concurrent_roots,
+      // because remembered set scan will `push` oops into the queues and
+      // resetting after this happens will lose those counts.
+      TASKQUEUE_STATS_ONLY(_mark.task_queues()->reset_taskqueue_stats());
+
+      // Concurrent remembered set scanning
+      entry_scan_remembered_set();
+
+      // Concurrent mark roots
+      entry_mark_roots();
+      if (check_cancellation_and_abort(ShenandoahDegenPoint::_degenerated_roots)) {
+        return false;
+      }
+
+      // Continue concurrent mark
+      entry_mark();
+      if (check_cancellation_and_abort(ShenandoahDegenPoint::_degenerated_mark)) {
+        return false;
+      }
+    }
+
+    // Complete marking under STW, and start evacuation
+    // [gc breakdown]
+    gc_majflt_stats.start();
+    vmop_entry_final_mark();
+    gc_majflt_stats.end_and_log("final mark");
+
+    // Scan and free dead ranges of partial free region.
+    if (UseProfileDeadPageInOld) {
+      // entry_free_dead_range();
+      // Debug with stw vmop
+      vmop_entry_free_dead_range();
+    }
+
+    // If the GC was cancelled before final mark, nothing happens on the safepoint. We are still
+    // in the marking phase and must resume the degenerated cycle from there. If the GC was cancelled
+    // after final mark, then we've entered the evacuation phase and must resume the degenerated cycle
+    // from that phase.
+    if (_generation->is_concurrent_mark_in_progress()) {
+      bool cancelled = check_cancellation_and_abort(ShenandoahDegenPoint::_degenerated_mark);
+      assert(cancelled, "GC must have been cancelled between concurrent and final mark");
       return false;
     }
   }
 
-  // Complete marking under STW, and start evacuation
-  // [gc breakdown]
-  gc_majflt_stats.start();
-  vmop_entry_final_mark();
-  gc_majflt_stats.end_and_log("final mark");
-
-  // Scan and free dead ranges of partial free region.
-  if (UseProfileDeadPageInOld) {
-    // entry_free_dead_range();
-    // Debug with stw vmop
-    vmop_entry_free_dead_range();
+  if (!_evac_only) {
+    assert(heap->is_concurrent_weak_root_in_progress(), "Must be doing weak roots now");
   }
-
-  // If the GC was cancelled before final mark, nothing happens on the safepoint. We are still
-  // in the marking phase and must resume the degenerated cycle from there. If the GC was cancelled
-  // after final mark, then we've entered the evacuation phase and must resume the degenerated cycle
-  // from that phase.
-  if (_generation->is_concurrent_mark_in_progress()) {
-    bool cancelled = check_cancellation_and_abort(ShenandoahDegenPoint::_degenerated_mark);
-    assert(cancelled, "GC must have been cancelled between concurrent and final mark");
-    return false;
-  }
-
-  assert(heap->is_concurrent_weak_root_in_progress(), "Must be doing weak roots now");
 
   // Concurrent stack processing
   if (heap->is_evacuation_in_progress()) {
     entry_thread_roots();
   }
 
-  // Process weak roots that might still point to regions that would be broken by cleanup.
-  // We cannot recycle regions because weak roots need to know what is marked in trashed regions.
-  entry_weak_refs();
-  entry_weak_roots();
+  if (!_evac_only) {
+    // Process weak roots that might still point to regions that would be broken by cleanup.
+    // We cannot recycle regions because weak roots need to know what is marked in trashed regions.
+    entry_weak_refs();
+    entry_weak_roots();
 
-  // Perform concurrent class unloading before any regions get recycled. Class unloading may
-  // need to inspect unmarked objects in trashed regions.
-  if (heap->unload_classes()) {
-    entry_class_unloading();
+    // Perform concurrent class unloading before any regions get recycled. Class unloading may
+    // need to inspect unmarked objects in trashed regions.
+    if (heap->unload_classes()) {
+      entry_class_unloading();
+    }
   }
 
   // Final mark might have reclaimed some immediate garbage, kick cleanup to reclaim
   // the space. This would be the last action if there is nothing to evacuate.  Note that
   // we will not age young-gen objects in the case that we skip evacuation.
-  entry_cleanup_early();
+  if (!_evac_only) {
+    entry_cleanup_early();
+  }
 
   heap->free_set()->log_status_under_lock();
 
@@ -298,6 +320,16 @@ void ShenandoahConcurrentGC::vmop_entry_final_mark() {
   VMThread::execute(&op); // jump to entry_final_mark under safepoint
 }
 
+void ShenandoahConcurrentGC::vmop_entry_init_evac_only() {
+  ShenandoahHeap* const heap = ShenandoahHeap::heap();
+  TraceCollectorStats tcs(heap->monitoring_support()->stw_collection_counters());
+  ShenandoahTimingsTracker timing(ShenandoahPhaseTimings::final_mark_gross);
+
+  heap->try_inject_alloc_failure();
+  VM_ShenandoahFinalMarkStartEvac op(this);
+  VMThread::execute(&op); // reuse final mark vmop, dispatches to op_init_evac_only via entry_final_mark
+}
+
 void ShenandoahConcurrentGC::vmop_entry_free_dead_range() {
   ShenandoahHeap* const heap = ShenandoahHeap::heap();
   TraceCollectorStats tcs(heap->monitoring_support()->stw_collection_counters());
@@ -352,15 +384,27 @@ void ShenandoahConcurrentGC::entry_init_mark() {
 }
 
 void ShenandoahConcurrentGC::entry_final_mark() {
-  const char* msg = final_mark_event_message();
-  ShenandoahPausePhase gc_phase(msg, ShenandoahPhaseTimings::final_mark);
-  EventMark em("%s", msg);
+  if (_evac_only) {
+    static const char* msg = "Pause Init Evac Only";
+    ShenandoahPausePhase gc_phase(msg, ShenandoahPhaseTimings::final_mark);
+    EventMark em("%s", msg);
 
-  ShenandoahWorkerScope scope(ShenandoahHeap::heap()->workers(),
-                              ShenandoahWorkerPolicy::calc_workers_for_final_marking(),
-                              "final marking");
+    ShenandoahWorkerScope scope(ShenandoahHeap::heap()->workers(),
+                                ShenandoahWorkerPolicy::calc_workers_for_final_marking(),
+                                "init evac only");
 
-  op_final_mark();
+    op_init_evac_only();
+  } else {
+    const char* msg = final_mark_event_message();
+    ShenandoahPausePhase gc_phase(msg, ShenandoahPhaseTimings::final_mark);
+    EventMark em("%s", msg);
+
+    ShenandoahWorkerScope scope(ShenandoahHeap::heap()->workers(),
+                                ShenandoahWorkerPolicy::calc_workers_for_final_marking(),
+                                "final marking");
+
+    op_final_mark();
+  }
 }
 
 void ShenandoahConcurrentGC::entry_pause_free_dead_range() {
@@ -860,6 +904,78 @@ void ShenandoahConcurrentGC::op_final_mark() {
   }
 }
 
+void ShenandoahConcurrentGC::op_init_evac_only() {
+  ShenandoahHeap* const heap = ShenandoahHeap::heap();
+  assert(ShenandoahSafepoint::is_at_shenandoah_safepoint(), "Should be at safepoint");
+  assert(!heap->has_forwarded_objects(), "No forwarded objects on this path");
+
+  if (!heap->cancelled_gc()) {
+    // For evac-only, we skip marking entirely.
+    // The mark bitmap from the trace-only cycle is still valid.
+    // We need to:
+    // 1. Invalidate live data for regions with new allocations (watermark check)
+    // 2. Build collection set using existing liveness data
+    // 3. Set up evacuation
+
+    // Invalidate regions that had allocations since trace-only.
+    // Set their live_data to region_size so they appear 100% live (not worth evacuating).
+    size_t excluded_regions = 0;
+    size_t eligible_regions = 0;
+    size_t num_regions = heap->num_regions();
+    for (size_t i = 0; i < num_regions; i++) {
+      ShenandoahHeapRegion* r = heap->get_region(i);
+      if (_generation->contains(r) && r->is_active() && r->is_young()) {
+        HeapWord* trace_top = r->top_at_last_trace();
+        if (trace_top == nullptr || r->top() != trace_top) {
+          // Region had allocations since trace-only, or wasn't traced.
+          // Set live data to used bytes so it won't be selected for evacuation.
+          r->set_live_data(r->used());
+          excluded_regions++;
+        } else {
+          eligible_regions++;
+        }
+      }
+    }
+    log_info(gc)("Evac-only: %zu regions eligible, %zu excluded (new allocations since trace)",
+                 eligible_regions, excluded_regions);
+
+    // Notify JVMTI that the tagmap table will need cleaning.
+    JvmtiTagMap::set_needs_cleaning();
+
+    // Build collection set and compute evacuation budgets using existing liveness data.
+    _generation->prepare_regions_and_collection_set(true /*concurrent*/);
+
+    // Has to be done after cset selection
+    heap->prepare_concurrent_roots();
+
+    if (!heap->collection_set()->is_empty()) {
+      LogTarget(Debug, gc, cset) lt;
+      if (lt.is_enabled()) {
+        ResourceMark rm;
+        LogStream ls(lt);
+        heap->collection_set()->print_on(&ls);
+      }
+
+      heap->set_evacuation_in_progress(true);
+      heap->set_has_forwarded_objects(true);
+
+      ShenandoahCodeRoots::arm_nmethods_for_evac();
+      ShenandoahStackWatermark::change_epoch_id();
+
+      if (ShenandoahPacing) {
+        heap->pacer()->setup_for_evac();
+      }
+    } else {
+      log_info(gc)("Evac-only: collection set is empty, nothing to evacuate");
+    }
+  }
+
+  {
+    ShenandoahTimingsTracker timing(ShenandoahPhaseTimings::final_mark_propagate_gc_state);
+    heap->propagate_gc_state_to_all_threads();
+  }
+}
+
 void ShenandoahConcurrentGC::op_free_dead_range(bool concurrent) {
   ShenandoahHeap::heap()->free_dead_range(concurrent);
 }
@@ -1315,7 +1431,11 @@ void ShenandoahConcurrentGC::op_reset_after_collect() {
     // If we are in the midst of an old gc bootstrap or an old marking, we want to leave the mark bit map of
     // the young generation intact. In particular, reference processing in the old generation may potentially
     // need the reachability of a young generation referent of a Reference object in the old generation.
-    if (!_do_old_gc_bootstrap && !heap->is_concurrent_old_mark_in_progress()) {
+    //
+    // Also preserve the bitmap after a trace-only cycle that completed without upgrade,
+    // so it can be reused by a subsequent evac-only cycle.
+    bool preserve_for_trace = _trace_only && _abbreviated;
+    if (!_do_old_gc_bootstrap && !heap->is_concurrent_old_mark_in_progress() && !preserve_for_trace) {
       heap->young_generation()->reset_mark_bitmap<false>();
     }
   } else {

@@ -56,10 +56,13 @@ private:
   bool                        _abbreviated;
   const bool                  _do_old_gc_bootstrap;
   const bool                  _trace_only;
+  const bool                  _evac_only;
 
 public:
-  ShenandoahConcurrentGC(ShenandoahGeneration* generation, bool do_old_gc_bootstrap, bool trace_only = false);
+  ShenandoahConcurrentGC(ShenandoahGeneration* generation, bool do_old_gc_bootstrap,
+                         bool trace_only = false, bool evac_only = false);
   bool is_trace_only() const { return _trace_only; }
+  bool is_evac_only() const { return _evac_only; }
   bool collect(GCCause::Cause cause) override;
   ShenandoahDegenPoint degen_point() const;
 
@@ -75,6 +78,7 @@ protected:
   void vmop_entry_init_update_refs();
   void vmop_entry_final_update_refs();
   void vmop_entry_final_roots();
+  void vmop_entry_init_evac_only();
 
   // Entry methods to normally STW GC operations. These set up logging, monitoring
   // and workers for net VM operation
@@ -114,6 +118,7 @@ protected:
   void op_mark_roots();
   void op_mark();
   virtual void op_final_mark();
+  void op_init_evac_only();
   void op_free_dead_range(bool concurrent);
   void op_thread_roots();
   void op_weak_refs();

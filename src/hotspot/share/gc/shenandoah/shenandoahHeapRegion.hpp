@@ -245,6 +245,10 @@ private:
 
   HeapWord* _top_before_promoted;
 
+  // Snapshot of top() at the end of a trace-only cycle.
+  // Used by evac-only to determine if the region had allocations since trace.
+  HeapWord* _top_at_last_trace;
+
   // Seldom updated fields
   volatile RegionState _state;
   HeapWord* _coalesce_and_fill_boundary; // for old regions not selected as collection set candidates.
@@ -438,6 +442,9 @@ public:
 
   HeapWord* new_top() const     { return _new_top; }
   void set_new_top(HeapWord* v) { _new_top = v;    }
+
+  HeapWord* top_at_last_trace() const     { return _top_at_last_trace; }
+  void set_top_at_last_trace(HeapWord* v) { _top_at_last_trace = v;    }
 
   HeapWord* bottom() const      { return _bottom;  }
   HeapWord* end() const         { return _end;     }

@@ -76,6 +76,9 @@ void ShenandoahRegulatorThread::regulate_young_and_old_cycles() {
             log_debug(gc)("Heuristics request for old collection accepted");
             _young_heuristics->cancel_trigger_request();
             _old_heuristics->cancel_trigger_request();
+          } else if (start_evac_only_young_cycle()) {
+            log_info(gc)("Heuristics request for young evac-only collection accepted (reusing trace bitmap)");
+            _young_heuristics->cancel_trigger_request();
           } else if (request_concurrent_gc(_heap->young_generation())) {
             log_debug(gc)("Heuristics request for young collection accepted");
             _young_heuristics->cancel_trigger_request();
@@ -175,6 +178,18 @@ bool ShenandoahRegulatorThread::start_global_cycle() const {
 
 bool ShenandoahRegulatorThread::start_trace_only_young_cycle() const {
   return _control_thread->request_trace_only_gc(_heap->young_generation());
+}
+
+bool ShenandoahRegulatorThread::start_evac_only_young_cycle() const {
+  if (!ShenandoahEnableYoungTraceOnlyTrigger || !_control_thread->is_trace_mark_valid()) {
+    return false;
+  }
+  double age_ms = (os::elapsedTime() - _control_thread->trace_mark_end_time()) * 1000;
+  if (age_ms > ShenandoahTraceOnlyEvacMaxAge) {
+    log_info(gc)("Trace bitmap too old (%.0fms > %zums), falling back to normal young GC", age_ms, (size_t)ShenandoahTraceOnlyEvacMaxAge);
+    return false;
+  }
+  return _control_thread->request_evac_only_gc(_heap->young_generation());
 }
 
 bool ShenandoahRegulatorThread::request_concurrent_gc(ShenandoahGeneration* generation) const {

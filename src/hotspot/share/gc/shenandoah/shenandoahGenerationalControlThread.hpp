@@ -45,6 +45,7 @@ public:
     none,
     concurrent_normal,
     concurrent_trace_only,
+    concurrent_evac_only,
     stw_degenerated,
     stw_full,
     bootstrapping_old,
@@ -101,6 +102,11 @@ private:
   // Used by the regulator to avoid triggering trace-only cycles too soon after real GC.
   volatile double _last_gc_end_time;
 
+  // True if the young mark bitmap from a trace-only cycle is still valid for evac-only reuse.
+  bool _trace_mark_valid;
+  // Timestamp when the trace-only cycle completed. Used to check if bitmap is too old.
+  double _trace_mark_end_time;
+
 public:
   ShenandoahGenerationalControlThread();
 
@@ -122,6 +128,20 @@ public:
 
   // Time when the last GC cycle ended (for trace-only min interval check).
   double last_gc_end_time() const { return _last_gc_end_time; }
+
+  // Return true if the request to start an evac-only young GC succeeded.
+  bool request_evac_only_gc(ShenandoahGeneration* generation);
+
+  // Save per-region watermarks after trace-only completes.
+  void save_trace_watermarks(ShenandoahGeneration* generation);
+
+  // Trace mark bitmap validity for evac-only reuse.
+  bool is_trace_mark_valid() const { return _trace_mark_valid; }
+  double trace_mark_end_time() const { return _trace_mark_end_time; }
+  void set_trace_mark_valid(bool valid, double end_time = 0.0) {
+    _trace_mark_valid = valid;
+    if (valid) _trace_mark_end_time = end_time;
+  }
 
   // Returns the current state of the control thread
   GCMode gc_mode() const {

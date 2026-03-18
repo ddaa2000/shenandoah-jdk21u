@@ -65,6 +65,7 @@ class ShenandoahRegulatorThread: public ConcurrentGCThread {
   bool start_young_cycle() const;
   bool start_global_cycle() const;
   bool start_trace_only_young_cycle() const;
+  bool start_evac_only_young_cycle() const;
   bool resume_old_cycle();
 
   // The generational mode can only unload classes in a global cycle. The regulator
