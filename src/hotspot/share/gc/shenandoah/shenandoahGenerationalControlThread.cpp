@@ -143,18 +143,27 @@ void ShenandoahGenerationalControlThread::check_for_request(ShenandoahGCRequest&
     return;
   }
 
-  // If mode was already set to concurrent_trace_only by request_trace_only_gc,
-  // just prepare the heap for concurrent gc and keep the mode.
-  if (gc_mode() == concurrent_trace_only) {
-    _heap->set_unload_classes(false);
-    return;
-  }
+  // If the GC was cancelled (e.g., allocation failure), we must handle it properly
+  // regardless of the current gc_mode. In particular, a trace-only or evac-only cycle
+  // that was cancelled due to allocation failure must proceed to degenerated/full GC,
+  // not restart as another trace-only/evac-only cycle (which would cause a livelock
+  // since those modes don't free memory).
+  //
+  // Only use the trace-only/evac-only early return when there is NO cancellation pending.
+  if (!_heap->cancelled_gc()) {
+    // If mode was already set to concurrent_trace_only by request_trace_only_gc,
+    // just prepare the heap for concurrent gc and keep the mode.
+    if (gc_mode() == concurrent_trace_only) {
+      _heap->set_unload_classes(false);
+      return;
+    }
 
-  // If mode was already set to concurrent_evac_only by request_evac_only_gc,
-  // just prepare the heap and keep the mode.
-  if (gc_mode() == concurrent_evac_only) {
-    _heap->set_unload_classes(false);
-    return;
+    // If mode was already set to concurrent_evac_only by request_evac_only_gc,
+    // just prepare the heap and keep the mode.
+    if (gc_mode() == concurrent_evac_only) {
+      _heap->set_unload_classes(false);
+      return;
+    }
   }
 
   GCMode mode;

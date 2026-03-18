@@ -23,6 +23,8 @@
  */
 #include "precompiled.hpp"
 
+#include <sys/resource.h>
+
 #include "gc/shenandoah/heuristics/shenandoahHeuristics.hpp"
 #include "gc/shenandoah/mode/shenandoahMode.hpp"
 #include "gc/shenandoah/shenandoahAsserts.hpp"
@@ -38,7 +40,10 @@ ShenandoahRegulatorThread::ShenandoahRegulatorThread(ShenandoahGenerationalContr
   _control_thread(control_thread),
   _sleep(ShenandoahControlIntervalMin),
   _last_sleep_adjust_time(os::elapsedTime()),
-  _trace_only_interval_counter(0) {
+  _trace_only_interval_counter(0),
+  _last_cpu_time(0.0),
+  _last_wall_time(0.0),
+  _process_cpu_util(0.0) {
   shenandoah_assert_generational();
   _old_heuristics = _heap->old_generation()->heuristics();
   _young_heuristics = _heap->young_generation()->heuristics();
@@ -60,6 +65,7 @@ void ShenandoahRegulatorThread::run_service() {
 
 void ShenandoahRegulatorThread::regulate_young_and_old_cycles() {
   while (!should_terminate()) {
+    update_cpu_utilization();
     ShenandoahGenerationalControlThread::GCMode mode = _control_thread->gc_mode();
     if (mode == ShenandoahGenerationalControlThread::none) {
       if (should_start_metaspace_gc()) {
@@ -90,18 +96,27 @@ void ShenandoahRegulatorThread::regulate_young_and_old_cycles() {
           }
         } else if (ShenandoahEnableYoungTraceOnlyTrigger) {
           // Lowest priority: dummy trigger for trace-only young GC.
-          // Only fire if enough time has passed since the last GC cycle ended.
-          double since_last_gc_ms = (os::elapsedTime() - _control_thread->last_gc_end_time()) * 1000;
-          if (since_last_gc_ms >= ShenandoahYoungTraceOnlyMinGCInterval) {
-            _trace_only_interval_counter++;
-            if (_trace_only_interval_counter >= ShenandoahYoungTraceOnlyTriggerInterval) {
-              _trace_only_interval_counter = 0;
-              if (start_trace_only_young_cycle()) {
-                log_info(gc)("Trace-only dummy trigger: young trace-only cycle requested (%.0fms since last GC)", since_last_gc_ms);
-              }
-            }
-          } else {
+          // Only fire if enough time has passed since the last GC cycle ended
+          // and the process CPU utilization is below the threshold.
+          double cpu_pct = _process_cpu_util * 100.0;
+          if (cpu_pct > (double)ShenandoahTraceOnlyCpuThreshold) {
             _trace_only_interval_counter = 0;
+            log_debug(gc)("Trace-only suppressed: CPU util %.1f%% > threshold %zu%%",
+                          cpu_pct, (size_t)ShenandoahTraceOnlyCpuThreshold);
+          } else {
+            double since_last_gc_ms = (os::elapsedTime() - _control_thread->last_gc_end_time()) * 1000;
+            if (since_last_gc_ms >= ShenandoahYoungTraceOnlyMinGCInterval) {
+              _trace_only_interval_counter++;
+              if (_trace_only_interval_counter >= ShenandoahYoungTraceOnlyTriggerInterval) {
+                _trace_only_interval_counter = 0;
+                if (start_trace_only_young_cycle()) {
+                  log_info(gc)("Trace-only dummy trigger: young trace-only cycle requested (%.0fms since last GC, CPU util %.1f%%)",
+                               since_last_gc_ms, cpu_pct);
+                }
+              }
+            } else {
+              _trace_only_interval_counter = 0;
+            }
           }
         }
       }
@@ -206,6 +221,28 @@ bool ShenandoahRegulatorThread::request_concurrent_gc(ShenandoahGeneration* gene
 
 void ShenandoahRegulatorThread::stop_service() {
   log_debug(gc)("%s: Stop requested.", name());
+}
+
+void ShenandoahRegulatorThread::update_cpu_utilization() {
+  struct rusage usage;
+  if (getrusage(RUSAGE_SELF, &usage) != 0) {
+    return;
+  }
+  double cpu_time = (double)usage.ru_utime.tv_sec + (double)usage.ru_utime.tv_usec / 1e6
+                  + (double)usage.ru_stime.tv_sec + (double)usage.ru_stime.tv_usec / 1e6;
+  double wall_time = os::elapsedTime();
+
+  if (_last_wall_time > 0.0) {
+    double delta_cpu = cpu_time - _last_cpu_time;
+    double delta_wall = wall_time - _last_wall_time;
+    if (delta_wall > 0.001) {
+      int cpu_count = os::active_processor_count();
+      _process_cpu_util = delta_cpu / (delta_wall * cpu_count);
+    }
+  }
+
+  _last_cpu_time = cpu_time;
+  _last_wall_time = wall_time;
 }
 
 bool ShenandoahRegulatorThread::should_start_metaspace_gc() {

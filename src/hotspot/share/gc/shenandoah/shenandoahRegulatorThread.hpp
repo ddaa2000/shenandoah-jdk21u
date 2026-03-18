@@ -89,6 +89,13 @@ class ShenandoahRegulatorThread: public ConcurrentGCThread {
 
   // Counter for trace-only dummy trigger interval
   uint _trace_only_interval_counter;
+
+  // CPU utilization tracking for trace-only gating
+  double _last_cpu_time;    // cumulative process CPU time (seconds) at last sample
+  double _last_wall_time;   // wall clock time (seconds) at last sample
+  double _process_cpu_util; // most recent process CPU utilization (0.0 - 1.0)
+
+  void update_cpu_utilization();
 };
 
 

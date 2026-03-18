@@ -576,6 +576,14 @@
           "older than this, a normal young GC cycle is used instead.")      \
           range(0, 60000)                                                   \
                                                                             \
+  product(uintx, ShenandoahTraceOnlyCpuThreshold, 30, EXPERIMENTAL,       \
+          "Maximum process CPU utilization (percent, 0-100) at which "     \
+          "trace-only young cycles are allowed to trigger. If the "        \
+          "process CPU utilization exceeds this threshold, trace-only "    \
+          "cycles are suppressed to avoid adding GC overhead during "      \
+          "busy periods.")                                                  \
+          range(0, 100)                                                     \
+                                                                            \
   product(uintx, ShenandoahAgingCyclePeriod, 1, EXPERIMENTAL,               \
           "With generational mode, increment the age of objects and"        \
           "regions each time this many young-gen GC cycles are completed.") \
