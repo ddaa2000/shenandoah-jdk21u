@@ -369,6 +369,88 @@ inline void ShenandoahMark::mark_ref(ShenandoahObjToScanQueue* q,
   }
 }
 
+// Finger-aware mark_ref: only pushes if object is below the finger (already-scanned territory).
+// Objects above the finger will be found by bitmap scan later (implicit grey).
+inline void ShenandoahMark::mark_ref_with_finger(ShenandoahObjToScanQueue* q,
+                                                  ShenandoahMarkingContext* const mark_context,
+                                                  bool weak, oop obj,
+                                                  ShenandoahFingerTask* finger_task) {
+  bool skip_live = false;
+  bool marked;
+  if (weak) {
+    marked = mark_context->mark_weak(obj);
+  } else {
+    marked = mark_context->mark_strong(obj, /* was_upgraded = */ skip_live);
+  }
+  if (marked) {
+    HeapWord* obj_addr = cast_from_oop<HeapWord*>(obj);
+    if (is_below_finger(obj_addr, finger_task)) {
+      bool pushed = q->push(ShenandoahMarkTask(obj, skip_live, weak));
+      assert(pushed, "overflow queue should always succeed pushing");
+    }
+    // else: above finger, bitmap scan will find it later
+  }
+}
+
+template<class T, ShenandoahGenerationType GENERATION>
+inline void ShenandoahMark::mark_through_ref_with_finger(T *p, ShenandoahObjToScanQueue* q, ShenandoahObjToScanQueue* old_q,
+                                                          ShenandoahMarkingContext* const mark_context, bool weak,
+                                                          ShenandoahFingerTask* finger_task) {
+  T o = RawAccess<>::oop_load(p);
+  if (!CompressedOops::is_null(o)) {
+    oop obj = CompressedOops::decode_not_null(o);
+
+    ShenandoahGenerationalHeap* heap = ShenandoahGenerationalHeap::heap();
+    shenandoah_assert_not_forwarded(p, obj);
+    shenandoah_assert_not_in_cset_except(p, obj, heap->cancelled_gc());
+    if (in_generation<GENERATION>(heap, obj)) {
+      mark_ref_with_finger(q, mark_context, weak, obj, finger_task);
+      shenandoah_assert_marked(p, obj);
+      if (GENERATION == YOUNG && heap->is_in_old(p)) {
+        heap->old_generation()->mark_card_as_dirty((HeapWord*)p);
+      } else if (GENERATION == GLOBAL && heap->is_in_old(p) && heap->is_in_young(obj)) {
+        heap->old_generation()->mark_card_as_dirty((HeapWord*)p);
+      }
+    } else if (old_q != nullptr) {
+      // Young mark, bootstrapping old_q or concurrent with old_q marking.
+      // Old gen objects are always pushed (not subject to finger optimization).
+      mark_ref(old_q, mark_context, weak, obj);
+      shenandoah_assert_marked(p, obj);
+    } else if (GENERATION == OLD) {
+      if (heap->is_in(p)) {
+        assert(heap->is_in_young(obj), "Expected young object.");
+        heap->old_generation()->mark_card_as_dirty(p);
+      }
+    }
+  }
+}
+
+inline bool ShenandoahMark::is_below_finger(HeapWord* obj_addr, ShenandoahFingerTask* finger_task) const {
+  ShenandoahHeap* heap = ShenandoahHeap::heap();
+  size_t obj_region_idx = heap->heap_region_index_containing(obj_addr);
+  ShenandoahHeapRegion* obj_region = heap->get_region(obj_region_idx);
+
+  // If object is in the current region being scanned, use local finger
+  if (obj_region == finger_task->curr_region()) {
+    return obj_addr < finger_task->local_finger();
+  }
+
+  // If object is in a young region, check against global finger index
+  if (obj_region->is_young()) {
+    size_t finger_idx = _region_to_finger_index[obj_region_idx];
+    if (finger_idx == SIZE_MAX) {
+      // Young region not in finger set (e.g. empty at mark start) — must push
+      return true;
+    }
+    size_t global_idx = Atomic::load(&_finger_claim_index);
+    return finger_idx < global_idx;
+  }
+
+  // Object is in old region — always push (cross-gen reference handling via old_q)
+  // This path shouldn't normally be hit for in-generation refs, but be safe.
+  return true;
+}
+
 ShenandoahObjToScanQueueSet* ShenandoahMark::task_queues() const {
   return _task_queues;
 }

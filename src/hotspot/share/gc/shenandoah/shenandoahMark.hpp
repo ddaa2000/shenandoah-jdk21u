@@ -33,6 +33,7 @@
 #include "gc/shenandoah/shenandoahHeap.hpp"
 #include "gc/shenandoah/shenandoahGeneration.hpp"
 #include "gc/shenandoah/shenandoahTaskqueue.hpp"
+#include "runtime/atomic.hpp"
 
 enum StringDedupMode {
   NO_DEDUP,      // Do not do anything for String deduplication
@@ -42,6 +43,26 @@ enum StringDedupMode {
 
 class ShenandoahMarkingContext;
 class ShenandoahReferenceProcessor;
+class ShenandoahHeapRegion;
+
+// Per-worker state for finger-based bitmap scanning within a claimed region.
+class ShenandoahFingerTask {
+private:
+  ShenandoahHeapRegion* _curr_region;   // Currently claimed region (null if none)
+  HeapWord*             _local_finger;  // Local scanning cursor within region
+  HeapWord*             _region_limit;  // TAMS of current region
+
+public:
+  ShenandoahFingerTask() : _curr_region(nullptr), _local_finger(nullptr), _region_limit(nullptr) {}
+
+  ShenandoahHeapRegion* curr_region() const { return _curr_region; }
+  HeapWord*             local_finger() const { return _local_finger; }
+  HeapWord*             region_limit() const { return _region_limit; }
+
+  void setup_for_region(ShenandoahHeapRegion* r, ShenandoahMarkingContext* ctx);
+  void move_finger_to(HeapWord* addr) { _local_finger = addr; }
+  void giveup_current_region();
+};
 
 // Base class for mark
 // Mark class does not maintain states. Instead, mark states are
@@ -52,6 +73,14 @@ protected:
   ShenandoahObjToScanQueueSet* const _task_queues;
   ShenandoahObjToScanQueueSet* const _old_gen_task_queues;
 
+  // Finger-based marking support: sorted array of young regions for sequential scanning
+  ShenandoahHeapRegion** _finger_regions;
+  size_t                 _finger_region_count;
+  volatile size_t        _finger_claim_index;
+
+  // Lookup table: heap region index -> finger region index (SIZE_MAX if not in finger set)
+  size_t*                _region_to_finger_index;
+
 protected:
   ShenandoahMark(ShenandoahGeneration* generation);
 
@@ -59,9 +88,23 @@ public:
   template<class T, ShenandoahGenerationType GENERATION>
   static inline void mark_through_ref(T* p, ShenandoahObjToScanQueue* q, ShenandoahObjToScanQueue* old_q, ShenandoahMarkingContext* const mark_context, bool weak);
 
+  // Finger-aware version: skips pushing if object is above the finger (implicit grey)
+  template<class T, ShenandoahGenerationType GENERATION>
+  inline void mark_through_ref_with_finger(T* p, ShenandoahObjToScanQueue* q, ShenandoahObjToScanQueue* old_q,
+                                           ShenandoahMarkingContext* const mark_context, bool weak,
+                                           ShenandoahFingerTask* finger_task);
+
   // Loom support
   void start_mark();
   void end_mark();
+
+  // Finger-based marking support
+  void init_finger_regions();
+  void destroy_finger_regions();
+  ShenandoahHeapRegion* claim_next_finger_region();
+  inline bool is_below_finger(HeapWord* obj_addr, ShenandoahFingerTask* finger_task) const;
+
+  bool use_finger_marking() const { return _finger_regions != nullptr; }
 
   // Helpers
   inline ShenandoahObjToScanQueueSet* task_queues() const;
@@ -104,6 +147,15 @@ private:
   static void mark_ref(ShenandoahObjToScanQueue* q,
                        ShenandoahMarkingContext* const mark_context,
                        bool weak, oop obj);
+
+  // Finger-aware mark_ref: only pushes if object is below finger (already scanned territory)
+  inline void mark_ref_with_finger(ShenandoahObjToScanQueue* q,
+                                   ShenandoahMarkingContext* const mark_context,
+                                   bool weak, oop obj,
+                                   ShenandoahFingerTask* finger_task);
+
+  template <class T, ShenandoahGenerationType GENERATION, bool CANCELLABLE, StringDedupMode STRING_DEDUP>
+  void mark_loop_work_finger(T* cl, ShenandoahLiveData* live_data, uint worker_id, TaskTerminator *t, StringDedup::Requests* const req);
 
   template <StringDedupMode STRING_DEDUP>
   inline void dedup_string(oop obj, StringDedup::Requests* const req);

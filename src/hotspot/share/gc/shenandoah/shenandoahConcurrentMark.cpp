@@ -233,6 +233,11 @@ void ShenandoahConcurrentMark::concurrent_mark() {
   uint nworkers = workers->active_workers();
   task_queues()->reserve(nworkers);
 
+  // Initialize finger-based marking for young generation if enabled
+  if (ShenandoahUseFingerMarking && _generation->type() == YOUNG) {
+    init_finger_regions();
+  }
+
   ShenandoahGenerationType gen_type = _generation->type();
   ShenandoahSATBMarkQueueSet& qset = ShenandoahBarrierSet::satb_mark_queue_set();
   ShenandoahFlushSATBHandshakeClosure flush_satb(qset);
@@ -284,6 +289,35 @@ void ShenandoahConcurrentMark::concurrent_mark() {
     }
   }
   assert(task_queues()->is_empty() || heap->cancelled_gc(), "Should be empty when not cancelled");
+
+  // If GC was cancelled during concurrent finger-based marking, objects may be
+  // marked in the bitmap but not yet scanned by the interrupted bitmap scan.
+  // The degenerated handler's finish_mark() creates a new ShenandoahConcurrentMark
+  // without finger state and uses regular queue-based marking, which only drains
+  // queues and SATB — it never re-scans the bitmap. So we must push all marked
+  // objects from finger regions to the queues now, ensuring the degenerated handler
+  // can trace their references.
+  if (heap->cancelled_gc()) {
+    if (_finger_regions != nullptr) {
+      ShenandoahMarkingContext* ctx = heap->marking_context();
+      // Use queue 0 as the target — finish_mark will redistribute via work stealing.
+      ShenandoahObjToScanQueue* q = task_queues()->queue(0);
+      for (size_t i = 0; i < _finger_region_count; i++) {
+        ShenandoahHeapRegion* r = _finger_regions[i];
+        HeapWord* tams = ctx->top_at_mark_start(r);
+        HeapWord* addr = r->bottom();
+        while (addr < tams) {
+          addr = ctx->get_next_marked_addr(addr, tams);
+          if (addr < tams) {
+            oop obj = cast_to_oop(addr);
+            q->push(ShenandoahMarkTask(obj));
+            addr += obj->size();
+          }
+        }
+      }
+    }
+    destroy_finger_regions();
+  }
 }
 
 void ShenandoahConcurrentMark::finish_mark() {
@@ -292,6 +326,9 @@ void ShenandoahConcurrentMark::finish_mark() {
   finish_mark_work();
   assert(task_queues()->is_empty(), "Should be empty");
   TASKQUEUE_STATS_ONLY(task_queues()->print_and_reset_taskqueue_stats(""));
+
+  // Clean up finger-based marking state
+  destroy_finger_regions();
 
   _generation->set_concurrent_mark_in_progress(false);
   _generation->set_mark_complete();

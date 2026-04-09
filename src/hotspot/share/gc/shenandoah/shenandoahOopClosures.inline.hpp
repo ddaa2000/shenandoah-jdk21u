@@ -55,4 +55,9 @@ inline void ShenandoahConcUpdateRefsClosure::work(T* p) {
   _heap->conc_update_with_forwarded(p);
 }
 
+template<class T, ShenandoahGenerationType GENERATION>
+inline void ShenandoahMarkRefsFingerSuperClosure::work(T* p) {
+  _mark->mark_through_ref_with_finger<T, GENERATION>(p, _queue, _old_queue, _mark_context, _weak, _finger_task);
+}
+
 #endif // SHARE_GC_SHENANDOAH_SHENANDOAHOOPCLOSURES_INLINE_HPP

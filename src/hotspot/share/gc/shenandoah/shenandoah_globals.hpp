@@ -584,6 +584,13 @@
           "busy periods.")                                                  \
           range(0, 100)                                                     \
                                                                             \
+  product(bool, ShenandoahUseFingerMarking, false, EXPERIMENTAL,             \
+          "Use G1-style finger-based bitmap scanning during young "         \
+          "concurrent marking. Workers claim regions in address order "     \
+          "and scan the mark bitmap linearly. References to objects "       \
+          "above the global finger are not pushed to the mark queue "       \
+          "(implicitly grey), reducing queue pressure.")                    \
+                                                                            \
   product(uintx, ShenandoahAgingCyclePeriod, 1, EXPERIMENTAL,               \
           "With generational mode, increment the age of objects and"        \
           "regions each time this many young-gen GC cycles are completed.") \

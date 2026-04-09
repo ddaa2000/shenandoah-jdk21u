@@ -36,13 +36,12 @@
 #include "runtime/javaThread.hpp"
 
 class ShenandoahMarkRefsSuperClosure : public MetadataVisitingOopIterateClosure {
-private:
+protected:
   ShenandoahObjToScanQueue* _queue;
   ShenandoahObjToScanQueue* _old_queue;
   ShenandoahMarkingContext* const _mark_context;
   bool _weak;
 
-protected:
   template <class T, ShenandoahGenerationType GENERATION>
   void work(T *p);
 
@@ -138,6 +137,44 @@ public:
 
   virtual void do_oop(narrowOop* p) { work(p); }
   virtual void do_oop(oop* p)       { work(p); }
+};
+
+// Finger-aware marking closures: use mark_through_ref_with_finger which skips
+// pushing objects above the finger (they will be found by bitmap scan later).
+class ShenandoahMark;
+class ShenandoahFingerTask;
+
+class ShenandoahMarkRefsFingerSuperClosure : public ShenandoahMarkRefsSuperClosure {
+protected:
+  ShenandoahMark* _mark;
+  ShenandoahFingerTask* _finger_task;
+
+  template <class T, ShenandoahGenerationType GENERATION>
+  inline void work(T* p);
+
+public:
+  ShenandoahMarkRefsFingerSuperClosure(ShenandoahObjToScanQueue* q, ShenandoahReferenceProcessor* rp,
+                                       ShenandoahObjToScanQueue* old_q,
+                                       ShenandoahMark* mark, ShenandoahFingerTask* finger_task);
+
+  ShenandoahFingerTask* finger_task() const { return _finger_task; }
+  void set_finger_task(ShenandoahFingerTask* ft) { _finger_task = ft; }
+};
+
+template <ShenandoahGenerationType GENERATION>
+class ShenandoahMarkRefsFingerClosure : public ShenandoahMarkRefsFingerSuperClosure {
+private:
+  template <class T>
+  inline void do_oop_work(T* p) { work<T, GENERATION>(p); }
+
+public:
+  ShenandoahMarkRefsFingerClosure(ShenandoahObjToScanQueue* q, ShenandoahReferenceProcessor* rp,
+                                  ShenandoahObjToScanQueue* old_q,
+                                  ShenandoahMark* mark, ShenandoahFingerTask* finger_task) :
+    ShenandoahMarkRefsFingerSuperClosure(q, rp, old_q, mark, finger_task) {}
+
+  virtual void do_oop(narrowOop* p) { do_oop_work(p); }
+  virtual void do_oop(oop* p)       { do_oop_work(p); }
 };
 
 #endif // SHARE_GC_SHENANDOAH_SHENANDOAHOOPCLOSURES_HPP
