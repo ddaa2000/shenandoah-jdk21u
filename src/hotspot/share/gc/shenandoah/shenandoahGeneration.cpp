@@ -813,7 +813,11 @@ void ShenandoahGeneration::prepare_regions_and_collection_set(bool concurrent, b
     size_t first_old, last_old, num_old;
     heap->free_set()->prepare_to_rebuild(young_cset_regions, old_cset_regions, first_old, last_old, num_old);
     // Free set construction uses reserve quantities, because they are known to be valid here
-    heap->free_set()->finish_rebuild(young_cset_regions, old_cset_regions, num_old, true);
+    if (!UseShenFixYoungSize) {
+      heap->free_set()->finish_rebuild(young_cset_regions, old_cset_regions, num_old, true);
+    } else {
+      heap->free_set()->rebuild_simple(young_cset_regions, old_cset_regions);
+    }
   }
 }
 

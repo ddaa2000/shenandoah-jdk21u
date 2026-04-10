@@ -1222,7 +1222,9 @@ void ShenandoahFullGC::phase5_epilog() {
     post_compact.update_generation_usage();
 
     if (heap->mode()->is_generational()) {
-      ShenandoahGenerationalFullGC::balance_generations_after_gc(heap);
+      if (!UseShenFixYoungSize) {
+        ShenandoahGenerationalFullGC::balance_generations_after_gc(heap);
+      }
     }
 
     heap->collection_set()->clear();
@@ -1233,10 +1235,16 @@ void ShenandoahFullGC::phase5_epilog() {
     // We also do not expand old generation size following Full GC because we have scrambled age populations and
     // no longer have objects separated by age into distinct regions.
     if (heap->mode()->is_generational()) {
-      ShenandoahGenerationalFullGC::compute_balances();
+      if (!UseShenFixYoungSize) {
+        ShenandoahGenerationalFullGC::compute_balances();
+      }
     }
 
-    heap->free_set()->finish_rebuild(young_cset_regions, old_cset_regions, num_old);
+    if (!UseShenFixYoungSize) {
+      heap->free_set()->finish_rebuild(young_cset_regions, old_cset_regions, num_old);
+    } else {
+      heap->free_set()->rebuild_simple(young_cset_regions, old_cset_regions);
+    }
 
     heap->clear_cancelled_gc(true /* clear oom handler */);
   }

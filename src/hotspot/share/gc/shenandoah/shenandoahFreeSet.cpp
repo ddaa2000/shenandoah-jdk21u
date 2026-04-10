@@ -1621,6 +1621,170 @@ void ShenandoahFreeSet::finish_rebuild(size_t young_cset_regions, size_t old_cse
   log_status();
 }
 
+void ShenandoahFreeSet::rebuild_simple(size_t young_cset_regions, size_t old_cset_regions) {
+  shenandoah_assert_heaplocked();
+  size_t young_reserve, old_reserve;
+  size_t region_size_bytes = ShenandoahHeapRegion::region_size_bytes();
+
+  size_t old_available = _heap->old_generation()->available();
+  size_t old_unaffiliated_regions = _heap->old_generation()->free_unaffiliated_regions();
+  size_t young_available = _heap->young_generation()->available();
+  size_t young_unaffiliated_regions = _heap->young_generation()->free_unaffiliated_regions();
+  size_t young_unaffiliated_regions_orig = young_unaffiliated_regions;
+
+  old_unaffiliated_regions += old_cset_regions;
+  old_available += old_cset_regions * region_size_bytes;
+  young_unaffiliated_regions += young_cset_regions;
+  young_available += young_cset_regions * region_size_bytes;
+
+  // If MaxNewSize is set with cmd option, soft_max_capacity equals MaxNewSize
+  size_t young_soft_max_capacity_regions = _heap->young_generation()->soft_max_capacity() / region_size_bytes;
+  size_t young_used_regions = _heap->young_generation()->used_regions();
+
+  size_t old_region_surplus = 0;
+  size_t old_region_deficit = 0;
+
+  log_info(gc)("rebuild_simple: young_soft_max " SIZE_FORMAT ", young_used " SIZE_FORMAT
+               ", young_unaffiliated_orig " SIZE_FORMAT,
+               young_soft_max_capacity_regions, young_used_regions, young_unaffiliated_regions_orig);
+
+  if (young_soft_max_capacity_regions > young_used_regions + young_unaffiliated_regions_orig) {
+    old_region_surplus = young_soft_max_capacity_regions - young_used_regions - young_unaffiliated_regions_orig;
+  } else {
+    old_region_deficit = young_used_regions + young_unaffiliated_regions_orig - young_soft_max_capacity_regions;
+  }
+
+  if (old_region_surplus > 0) {
+    old_region_surplus = MIN2(old_region_surplus, old_unaffiliated_regions);
+  }
+  if (old_region_deficit > 0) {
+    old_region_deficit = MIN2(old_region_deficit, young_unaffiliated_regions);
+  }
+
+  _heap->old_generation()->set_region_balance(
+    checked_cast<ssize_t>(old_region_surplus) - checked_cast<ssize_t>(old_region_deficit));
+
+  log_info(gc)("rebuild_simple: old deficit " SIZE_FORMAT " old surplus " SIZE_FORMAT,
+               old_region_deficit, old_region_surplus);
+
+  // Consult old-region surplus and deficit to make adjustments to current generation capacities and availability.
+  if (old_region_surplus > 0) {
+    size_t xfer_bytes = old_region_surplus * region_size_bytes;
+    assert(old_region_surplus <= old_unaffiliated_regions, "Cannot transfer regions that are affiliated");
+    old_available -= xfer_bytes;
+    old_unaffiliated_regions -= old_region_surplus;
+    young_available += xfer_bytes;
+    young_unaffiliated_regions += old_region_surplus;
+  } else if (old_region_deficit > 0) {
+    size_t xfer_bytes = old_region_deficit * region_size_bytes;
+    assert(old_region_deficit <= young_unaffiliated_regions, "Cannot transfer regions that are affiliated");
+    old_available += xfer_bytes;
+    old_unaffiliated_regions += old_region_deficit;
+    young_available -= xfer_bytes;
+    young_unaffiliated_regions -= old_region_deficit;
+  }
+
+  // Evac reserve: reserve trailing space for evacuations
+  if (!_heap->mode()->is_generational()) {
+    young_reserve = (_heap->max_capacity() / 100) * ShenandoahEvacReserve;
+    old_reserve = 0;
+  } else {
+    // For fixed young gen size, we use the standard evac reserve computation
+    young_reserve = (_heap->young_generation()->max_capacity() * ShenandoahEvacReserve) / 100;
+    old_reserve = old_available;
+  }
+
+  // Use unaffiliated regions for old reserve
+  old_reserve = old_unaffiliated_regions * region_size_bytes;
+
+  // Clamp reserves
+  if (old_reserve > _partitions.capacity_of(ShenandoahFreeSetPartitionId::OldCollector)
+      + old_unaffiliated_regions * region_size_bytes) {
+    old_reserve = _partitions.capacity_of(ShenandoahFreeSetPartitionId::OldCollector)
+      + old_unaffiliated_regions * region_size_bytes;
+  }
+
+  if (young_reserve > young_unaffiliated_regions * region_size_bytes) {
+    young_reserve = young_unaffiliated_regions * region_size_bytes;
+  }
+
+  log_info(gc)("rebuild_simple: young reserve " SIZE_FORMAT " regions, young_unaffiliated " SIZE_FORMAT " regions",
+               young_reserve / region_size_bytes, young_unaffiliated_regions);
+
+  reserve_regions_simple(young_reserve, young_unaffiliated_regions);
+  establish_old_collector_alloc_bias();
+  _partitions.assert_bounds();
+  log_status();
+}
+
+void ShenandoahFreeSet::reserve_regions_simple(size_t to_reserve, size_t young_unaffiliated_target) {
+  // Count free (unaffiliated/trash) regions in each partition
+  size_t free_young = 0;
+
+  for (ssize_t index = _partitions.leftmost(ShenandoahFreeSetPartitionId::Mutator);
+       index <= _partitions.rightmost(ShenandoahFreeSetPartitionId::Mutator); index++) {
+    if (_partitions.in_free_set(ShenandoahFreeSetPartitionId::Mutator, index)) {
+      ShenandoahHeapRegion* r = _heap->get_region((size_t) index);
+      if (r->affiliation() == ShenandoahAffiliation::FREE || r->is_trash()) {
+        free_young++;
+      }
+    }
+  }
+  for (ssize_t index = _partitions.leftmost(ShenandoahFreeSetPartitionId::Collector);
+       index <= _partitions.rightmost(ShenandoahFreeSetPartitionId::Collector); index++) {
+    if (_partitions.in_free_set(ShenandoahFreeSetPartitionId::Collector, index)) {
+      ShenandoahHeapRegion* r = _heap->get_region((size_t) index);
+      if (r->affiliation() == ShenandoahAffiliation::FREE || r->is_trash()) {
+        free_young++;
+      }
+    }
+  }
+
+  log_info(gc)("reserve_regions_simple: free young " SIZE_FORMAT ", young_unaffiliated_target " SIZE_FORMAT,
+               free_young, young_unaffiliated_target);
+
+  for (size_t i = _heap->num_regions(); i > 0; i--) {
+    size_t idx = i - 1;
+    ShenandoahHeapRegion* r = _heap->get_region(idx);
+    if (!_partitions.in_free_set(ShenandoahFreeSetPartitionId::Mutator, idx)) {
+      continue;
+    }
+
+    size_t ac = alloc_capacity(r);
+    assert(ac > 0, "Membership in free set implies has capacity");
+    assert(!r->is_old() || r->is_trash(), "Except for trash, mutator_is_free regions should not be affiliated OLD");
+
+    bool move_to_young = _partitions.available_in(ShenandoahFreeSetPartitionId::Collector) < to_reserve;
+    bool move_to_old = free_young > young_unaffiliated_target;
+
+    if (!move_to_old && !move_to_young) {
+      break;
+    }
+
+    if (move_to_old) {
+      if (r->is_trash() || !r->is_affiliated()) {
+        _partitions.move_from_partition_to_partition(idx, ShenandoahFreeSetPartitionId::Mutator,
+                                                     ShenandoahFreeSetPartitionId::OldCollector, ac);
+        log_debug(gc, free)("  Shifting region " SIZE_FORMAT " from mutator_free to old_collector_free", idx);
+        free_young--;
+        continue;
+      }
+    }
+
+    if (move_to_young) {
+      _partitions.move_from_partition_to_partition(idx, ShenandoahFreeSetPartitionId::Mutator,
+                                                   ShenandoahFreeSetPartitionId::Collector, ac);
+      log_debug(gc, free)("  Shifting region " SIZE_FORMAT " from mutator_free to collector_free", idx);
+    }
+  }
+}
+
+size_t ShenandoahFreeSet::available_all() const {
+  return _partitions.available_in(ShenandoahFreeSetPartitionId::Mutator) +
+         _partitions.available_in(ShenandoahFreeSetPartitionId::Collector) +
+         _partitions.available_in(ShenandoahFreeSetPartitionId::OldCollector);
+}
+
 void ShenandoahFreeSet::compute_young_and_old_reserves(size_t young_cset_regions, size_t old_cset_regions,
                                                        bool have_evacuation_reserves,
                                                        size_t& young_reserve_result, size_t& old_reserve_result) const {

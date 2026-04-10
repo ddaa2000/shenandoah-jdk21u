@@ -206,6 +206,9 @@
           "mode. In percents of (soft) max young generation size.")         \
           range(0,100)                                                      \
                                                                             \
+  product(bool, UseShenFixYoungSize, false, EXPERIMENTAL,                   \
+          "Fix young size of GenShen")                                      \
+                                                                            \
   product(uintx, ShenandoahAllocationThreshold, 0, EXPERIMENTAL,            \
           "How many new allocations should happen since the last GC cycle " \
           "before some heuristics trigger the collection. In percents of "  \

@@ -488,6 +488,17 @@ public:
 
   void print_on(outputStream* out) const;
 
+  // Alternative rebuild for fixed young gen size mode (UseShenFixYoungSize).
+  // Instead of using the auto-sizer, this computes region balance based on soft_max_capacity
+  // (set via -XX:MaxNewSize) to maintain a fixed young generation size.
+  void rebuild_simple(size_t young_cset_regions, size_t old_cset_regions);
+
+  // Alternative reserve_regions for fixed young gen size mode.
+  void reserve_regions_simple(size_t to_reserve, size_t young_unaffiliated_target);
+
+  // Returns total available memory across all partitions (Mutator + Collector + OldCollector).
+  size_t available_all() const;
+
   // This function places all regions that have allocation capacity into the mutator partition, or if the region
   // is already affiliated with old, into the old collector partition, identifying regions that have no allocation
   // capacity as NotFree.  Capture the modified state of the freeset into var arguments:
